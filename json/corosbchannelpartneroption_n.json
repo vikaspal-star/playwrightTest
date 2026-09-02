@@ -27,10 +27,6 @@
       "action": "wait",
       "timeout": 5000
     },
-    {
-      "action": "browser-url-changed",
-      "url": "https://coro.sb.amp.vg/"
-    },
     
     {
       "action": "screenshot",
