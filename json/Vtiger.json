@@ -3,7 +3,7 @@
   "steps": [
     {
       "action": "navigate",
-      "url": "http://localhost:8888/"
+      "url": "https://coro.sb.amp.vg/"
     },
     {
       "action": "wait-for-selector",
