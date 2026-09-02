@@ -24,13 +24,13 @@ export default defineConfig({
 
     browserName: "chromium",
 
-    headless: false,
+    headless: true,
 
     screenshot: "only-on-failure",
 
     video: "retain-on-failure",
 
-    trace: "retain-on-failure",
+    trace: "on-first-retry",
 
     actionTimeout: 30000,
 
