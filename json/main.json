@@ -3,7 +3,7 @@
   "steps": [
     {
       "action": "navigate",
-      "url": "https://mm.amp.vg"
+      "url": "https://main.dvl.amp.vg/"
     },
     {
       "action": "wait-for-selector",
