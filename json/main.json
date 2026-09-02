@@ -1,0 +1,78 @@
+{
+  "name": "mainAutomation",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "https://mm.amp.vg"
+    },
+    {
+      "action": "wait-for-selector",
+      "selector": "#email"
+    },
+    {
+      "action": "fill",
+      "selector": "#email",
+      "value": "Bhagyashri_SA"
+    },
+    {
+      "action": "fill",
+      "selector": "#formLogin #password",
+      "value": "Ishant@007"
+    },
+    {
+      "action": "click",
+      "selector": "#btnLogin"
+    },
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+    {
+      "action": "browser-url-changed",
+      "url": "https://main.dvl.amp.vg/#dashboard/corporatemarketing"
+    },
+
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action":"element-text",
+      "selector":"//span[normalize-space()='Dashboard']",
+      "text":"Dashboard"
+
+    },
+
+    {
+      "action": "hover",
+      "selector":"//span[normalize-space()='Setup']"
+    },
+
+    {
+      "action": "click",
+      "selector":"//span[normalize-space()='User Management']"
+    },
+
+    {
+      "action": "click",
+      "selector":"//span[normalize-space()='Users']"
+    },
+
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action":"element-text",
+      "selector":"//h1[normalize-space()='Users']",
+      "text":"Users"
+
+    }
+
+
+
+  
+
+]}

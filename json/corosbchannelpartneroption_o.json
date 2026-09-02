@@ -1,0 +1,169 @@
+{
+  "name": "coro-sb channelpartner/option_o",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "https://coro.sb.amp.vg/"
+    },
+    {
+      "action": "wait-for-selector",
+      "selector": "#email"
+    },
+    {
+      "action": "fill",
+      "selector": "#email",
+      "value": "vikas"
+    },
+    {
+      "action": "fill",
+      "selector": "#formLogin #password",
+      "value": "Coro@2000"
+    },
+    {
+      "action": "click",
+      "selector": "#btnLogin"
+    },
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+    {
+      "action": "browser-url-changed",
+      "url": "https://coro.sb.amp.vg/#dashboard/channelpartner"
+    },
+    
+    {
+      "action": "screenshot",
+      "screenshot": "screenshots/install-01Dashboard.png"
+    },
+
+     {
+      "action": "navigate",
+      "url": "https://coro.sb.amp.vg/#dashboard/channelpartner/option_o"
+    },
+    {
+      "action": "wait",
+      "timeout": 5000
+    },  
+     {
+      "action": "screenshot",
+      "screenshot": "screenshots/install-01Dashboard1.png"
+    },
+
+    {
+      "action": "hover",
+      "selector":".fa-pen"
+    },
+
+    {
+      "action": "click",
+      "selector":".fa-pen"
+    },
+
+    {
+      "action": "text-visible",
+      "selector":".fa-pen",
+      "text":"Personal Information"
+    },
+
+
+    {
+      "action":"back"
+    },
+
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action": "click",
+      "selector": "(//a[normalize-space()='Register Deal'])[1]"
+    },
+
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action":"back"
+    },
+
+    {
+      "action":"reload"
+    },
+
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action": "click",
+      "selector": "(//a[normalize-space()='View Related Opportunities'])[1]"
+    },
+
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action":"back"
+    },
+
+    {
+      "action":"reload"
+    },
+
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action":"screenshot",
+      "screenshot":"screenshots/last.png"
+    },
+
+    {
+      "action":"click",
+      "selector":"//span[@class='qtext']//a[text()='View Assets']"
+    },
+
+     {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action":"back"
+    },
+
+    {
+      "action":"reload"
+    },
+
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+
+    {
+      "action":"element-text",
+      "selector":"//span[normalize-space()='Reseller Onboarding']",
+      "text":"Reseller Onboarding"
+    },
+
+    {
+      "action":"screenshot",
+      "screenshot":"screenshots/Reseller Onboardingast.png"
+    }
+
+
+ 
+
+
+  ]
+}

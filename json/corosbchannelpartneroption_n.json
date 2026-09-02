@@ -1,0 +1,70 @@
+{
+  "name": "coro-sb channelpartner/option_n",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "https://coro.sb.amp.vg/"
+    },
+    {
+      "action": "wait-for-selector",
+      "selector": "#email"
+    },
+    {
+      "action": "fill",
+      "selector": "#email",
+      "value": "vikas"
+    },
+    {
+      "action": "fill",
+      "selector": "#formLogin #password",
+      "value": "Coro@2000"
+    },
+    {
+      "action": "click",
+      "selector": "#btnLogin"
+    },
+    {
+      "action": "wait",
+      "timeout": 5000
+    },
+    {
+      "action": "browser-url-changed",
+      "url": "https://coro.sb.amp.vg/"
+    },
+    
+    {
+      "action": "screenshot",
+      "screenshot": "screenshots/install-01Dashboard.png"
+    },
+
+     {
+      "action": "navigate",
+      "url": "https://coro.sb.amp.vg/#dashboard/channelpartner/option_n"
+    },
+    {
+      "action": "wait",
+      "timeout": 5000
+    },  
+     {
+      "action": "screenshot",
+      "screenshot": "screenshots/install-01Dashboard1.png"
+    },
+
+    {
+      "action": "hover",
+      "selector":".fa-pen"
+    },
+
+    {
+      "action": "click",
+      "selector":".fa-pen"
+    },
+
+    {
+      "action": "text-visible",
+      "selector":".fa-pen",
+      "text":"Personal Information"
+    }
+
+  ]
+}
