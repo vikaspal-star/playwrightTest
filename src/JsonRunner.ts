@@ -1,4 +1,5 @@
 import fs from "fs";
+import path from "path";
 
 import {
   Page
@@ -17,6 +18,33 @@ export interface TestCase {
   description?: string;
 
   steps: TestStep[];
+}
+
+
+// ============================================================
+// RUN EVENTS
+// ------------------------------------------------------------
+// When RUN_DIR is set (the UI sets it), the runner writes a
+// viewport screenshot after every step into that directory and
+// prints machine-readable "@@TEST {...}" / "@@STEP {...}" lines
+// that the UI server parses for live progress. Plain CLI runs
+// are unaffected.
+// ============================================================
+
+const RUN_DIR = process.env.RUN_DIR;
+
+function emit(
+  type: "TEST" | "STEP",
+  payload: Record<string, unknown>
+): void {
+
+  if (!RUN_DIR) {
+    return;
+  }
+
+  console.log(
+    `@@${type} ${JSON.stringify(payload)}`
+  );
 }
 
 
@@ -121,6 +149,12 @@ export class JsonRunner {
       `Steps: ${testCase.steps.length}`
     );
 
+    emit("TEST", {
+      file: path.basename(jsonPath),
+      name: testCase.name ?? "Unnamed Test",
+      steps: testCase.steps.length
+    });
+
 
     // ======================================
     // RUN STEPS
@@ -135,11 +169,15 @@ export class JsonRunner {
       const step =
         testCase.steps[i];
 
+      const index = i + 1;
+
+      const startedAt = Date.now();
+
 
       console.log("");
 
       console.log(
-        `STEP ${i + 1}/${testCase.steps.length}`
+        `STEP ${index}/${testCase.steps.length}`
       );
 
       console.log(
@@ -153,15 +191,47 @@ export class JsonRunner {
           step
         );
 
+        const screenshot =
+          await this.captureStep(index);
+
         console.log(
-          `✓ Step ${i + 1} Passed`
+          `✓ Step ${index} Passed`
         );
+
+        emit("STEP", {
+          index,
+          action: step.action,
+          status: "passed",
+          durationMs: Date.now() - startedAt,
+          screenshot
+        });
 
       } catch (error) {
 
+        const message =
+          error instanceof Error
+            ? error.message
+            : String(error);
+
+        const screenshot =
+          await this.captureStep(index);
+
         console.error(
-          `✗ Step ${i + 1} Failed`
+          `✗ Step ${index} Failed`
         );
+
+        console.error(
+          message
+        );
+
+        emit("STEP", {
+          index,
+          action: step.action,
+          status: "failed",
+          durationMs: Date.now() - startedAt,
+          screenshot,
+          error: message
+        });
 
         throw error;
       }
@@ -173,5 +243,38 @@ export class JsonRunner {
     console.log(
       `✓ COMPLETED: ${jsonPath}`
     );
+  }
+
+
+  // ======================================
+  // STEP SCREENSHOT (UI runs only)
+  // ======================================
+
+  private async captureStep(
+    index: number
+  ): Promise<string | undefined> {
+
+    if (!RUN_DIR) {
+      return undefined;
+    }
+
+    const file = `step-${index}.png`;
+
+    try {
+
+      fs.mkdirSync(RUN_DIR, { recursive: true });
+
+      await this.executor.currentPage.screenshot({
+        path: path.join(RUN_DIR, file),
+        fullPage: false
+      });
+
+      return file;
+
+    } catch {
+
+      // A screenshot must never fail the test itself.
+      return undefined;
+    }
   }
 }

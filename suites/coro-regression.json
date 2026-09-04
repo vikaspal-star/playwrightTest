@@ -1,0 +1,8 @@
+{
+  "name": "coro-regression",
+  "continueOnFailure": false,
+  "tests": [
+    "corosbchannelpartneroption_n.json",
+    "main.json"
+  ]
+}

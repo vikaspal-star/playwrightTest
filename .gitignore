@@ -7,3 +7,5 @@ screenshots/
 videos/
 .env
 *.log
+runs/
+ui/data/

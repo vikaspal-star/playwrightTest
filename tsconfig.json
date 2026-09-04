@@ -2,25 +2,21 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
-
     "strict": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-
     "types": [
       "node",
       "@playwright/test"
     ],
-
     "skipLibCheck": true,
     "resolveJsonModule": true,
-
     "forceConsistentCasingInFileNames": true
   },
-
   "include": [
     "src/**/*.ts",
     "tests/**/*.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "ui/**/*.ts"
   ]
 }

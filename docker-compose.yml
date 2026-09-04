@@ -1,0 +1,42 @@
+# Test Studio storage.
+#
+#   docker compose up -d
+#
+# Postgres keeps run history, per-step results, and the learning
+# signals Test Studio builds up over time. The app works without it
+# (it falls back to the JSON files under ./runs), so this is additive:
+# start it when you want durable history and faster insights.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: teststudio-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: teststudio
+      POSTGRES_PASSWORD: teststudio
+      POSTGRES_DB: teststudio
+    ports:
+      # Host 5433 keeps out of the way of any Postgres you already run on 5432.
+      - "5433:5432"
+    volumes:
+      - teststudio-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teststudio -d teststudio"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional web UI for poking at the data directly: http://localhost:8081
+  # (server: postgres, user/password/db: teststudio)
+  adminer:
+    image: adminer:4
+    container_name: teststudio-adminer
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8081:8080"
+
+volumes:
+  teststudio-pgdata:

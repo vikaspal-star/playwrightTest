@@ -1,0 +1,9 @@
+{
+  "name": "test",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "https://"
+    }
+  ]
+}

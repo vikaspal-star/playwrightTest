@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "test-studio",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "ui"],
+      "port": 4173
+    },
+    {
+      "name": "playwright-report",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["playwright", "show-report", "--port", "9323"],
+      "port": 9323
+    }
+  ]
+}

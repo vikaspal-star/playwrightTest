@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Test Studio</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="auth-screen" class="auth-screen" hidden>
+  <div class="auth-card">
+    <div class="brand auth-brand">
+      <span class="brand-mark">▶</span>
+      <div>
+        <div class="brand-name">Test Studio</div>
+        <div class="brand-sub">playwright-json-framework</div>
+      </div>
+    </div>
+
+    <div id="auth-setup">
+      <h1>Create the admin account</h1>
+      <p class="muted">You're the first person here, so this account becomes an admin and can add teammates afterward.</p>
+      <form id="setup-form">
+        <label>Username<input id="setup-username" autocomplete="username" required></label>
+        <label>Password<input id="setup-password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <div id="setup-error" class="auth-error" hidden></div>
+        <button class="btn btn-primary btn-block" type="submit">Create admin account</button>
+      </form>
+    </div>
+
+    <div id="auth-login" hidden>
+      <h1>Log in</h1>
+      <form id="login-form">
+        <label>Username<input id="login-username" autocomplete="username" required></label>
+        <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+        <div id="login-error" class="auth-error" hidden></div>
+        <button class="btn btn-primary btn-block" type="submit">Log in</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="users-modal" class="modal-overlay" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Users</h2>
+      <button class="lightbox-close modal-close" id="btn-close-users" title="Close">✕</button>
+    </div>
+    <form id="add-user-form" class="add-user-form">
+      <input id="new-username" placeholder="Username" autocomplete="off" required>
+      <input id="new-password" type="password" placeholder="Password (min 8 chars)" autocomplete="new-password" required minlength="8">
+      <select id="new-role">
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+        <option value="site_admin">Site admin</option>
+      </select>
+      <button class="btn btn-primary" type="submit">Add</button>
+    </form>
+    <div id="users-error" class="auth-error" hidden></div>
+    <ul id="users-list" class="users-list"></ul>
+  </div>
+</div>
+
+<div id="share-modal" class="modal-overlay" hidden>
+  <div class="modal share-modal">
+    <div class="modal-head">
+      <h2>Share <span id="share-file" class="file-name"></span></h2>
+      <button class="lightbox-close modal-close" id="btn-close-share" title="Close">✕</button>
+    </div>
+
+    <div class="share-body">
+      <div class="share-link-row">
+        <input id="share-link" readonly>
+        <button id="btn-copy-link" class="btn btn-small">Copy link</button>
+      </div>
+
+      <div class="share-visibility">
+        <label><input type="radio" name="share-visibility" id="share-vis-team"> Everyone on this team can see and run it</label>
+        <label><input type="radio" name="share-visibility" id="share-vis-restricted"> Only specific people</label>
+      </div>
+
+      <div id="share-restricted-body" hidden>
+        <form id="share-add-form" class="add-user-form">
+          <select id="share-add-user"></select>
+          <select id="share-add-permission">
+            <option value="view">Can view &amp; run</option>
+            <option value="edit">Can edit</option>
+          </select>
+          <button class="btn btn-primary" type="submit">Add</button>
+        </form>
+        <ul id="share-list" class="users-list"></ul>
+      </div>
+    </div>
+
+    <div class="confirm-actions">
+      <button id="btn-share-cancel" class="btn">Cancel</button>
+      <button id="btn-share-save" class="btn btn-primary">Save sharing</button>
+    </div>
+  </div>
+</div>
+
+<div id="features-modal" class="modal-overlay" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Access for <span id="features-user" class="file-name"></span></h2>
+      <button class="lightbox-close modal-close" id="btn-close-features" title="Close">✕</button>
+    </div>
+    <div class="features-body">
+      <label class="feature-role-row">
+        Role
+        <select id="features-role">
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+          <option value="site_admin">Site admin</option>
+        </select>
+      </label>
+      <p class="muted feature-hint" id="features-hint"></p>
+      <ul id="features-list" class="features-list"></ul>
+    </div>
+    <div class="confirm-actions">
+      <button id="btn-features-cancel" class="btn">Cancel</button>
+      <button id="btn-features-save" class="btn btn-primary">Save access</button>
+    </div>
+  </div>
+</div>
+
+<div id="record-modal" class="modal-overlay" hidden>
+  <div class="modal record-modal">
+    <div class="modal-head">
+      <h2>Record steps</h2>
+      <button class="lightbox-close modal-close" id="btn-close-record" title="Close">✕</button>
+    </div>
+
+    <div class="record-body">
+      <div id="record-setup">
+        <p class="muted">A browser window opens at this URL. Everything you click, type, and select in it
+        becomes a step here. Close the window or press Stop when you are done.</p>
+        <form id="record-start-form" class="record-url-row">
+          <input id="record-url" placeholder="https://example.com/login" autocomplete="off" required>
+          <button class="btn btn-primary" type="submit">Open browser</button>
+        </form>
+        <div id="record-error" class="auth-error" hidden></div>
+      </div>
+
+      <div id="record-live" hidden>
+        <div class="record-status">
+          <span id="record-badge" class="badge running">recording</span>
+          <span id="record-count" class="muted">0 steps</span>
+          <button id="btn-record-stop" class="btn btn-danger btn-small">■ Stop</button>
+        </div>
+        <ol id="record-steps" class="record-steps"></ol>
+      </div>
+    </div>
+
+    <div class="confirm-actions">
+      <label class="record-mode">
+        <input type="checkbox" id="record-replace"> Replace existing steps
+      </label>
+      <button id="btn-record-cancel" class="btn">Close</button>
+      <button id="btn-record-apply" class="btn btn-primary" disabled>Add to test</button>
+    </div>
+  </div>
+</div>
+
+<div id="confirm-modal" class="modal-overlay" hidden>
+  <div class="modal confirm-modal">
+    <div class="modal-head"><h2 id="confirm-title"></h2></div>
+    <div class="confirm-body">
+      <p id="confirm-message"></p>
+      <input id="confirm-input" hidden autocomplete="off">
+    </div>
+    <div class="confirm-actions">
+      <button id="confirm-cancel" class="btn">Cancel</button>
+      <button id="confirm-ok" class="btn btn-primary">OK</button>
+    </div>
+  </div>
+</div>
+
+<div id="app-shell" hidden>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">▶</span>
+      <div>
+        <div class="brand-name">Test Studio</div>
+        <div class="brand-sub">playwright-json-framework</div>
+      </div>
+    </div>
+
+    <div class="sidebar-tabs">
+      <button class="tab active" data-tab="tests">Tests</button>
+      <button class="tab" data-tab="suites">Suites</button>
+      <button class="tab" data-tab="reports">Reports</button>
+    </div>
+
+    <div id="tests-panel" class="sidebar-panel">
+      <div class="sidebar-actions">
+        <button id="btn-new" class="btn btn-primary btn-block">+ New test</button>
+        <button id="btn-new-folder" class="btn btn-block btn-secondary-action">+ New folder</button>
+        <button id="btn-import" class="btn btn-block btn-secondary-action">Import JSON</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden>
+      </div>
+
+      <div class="sidebar-search">
+        <input id="test-search" type="search" placeholder="Search tests" autocomplete="off">
+      </div>
+
+      <div id="status-filter" class="status-filter">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="passed">Passed</button>
+        <button class="chip" data-filter="failed">Failed</button>
+        <button class="chip" data-filter="running">Running</button>
+      </div>
+
+      <ul id="test-tree" class="test-list"></ul>
+    </div>
+
+    <div id="suites-panel" class="sidebar-panel" hidden>
+      <div class="sidebar-actions">
+        <button id="btn-new-suite" class="btn btn-primary btn-block">+ New suite</button>
+      </div>
+      <ul id="suite-list" class="test-list"></ul>
+    </div>
+
+    <div id="reports-panel" class="sidebar-panel" hidden>
+      <div class="sidebar-actions">
+        <label class="report-range">
+          Range
+          <select id="report-days">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </label>
+        <button id="btn-refresh-report" class="btn btn-block btn-secondary-action">Refresh</button>
+      </div>
+      <p class="muted report-side-note">Aggregated from every stored run.</p>
+    </div>
+
+    <div class="sidebar-footer">
+      <a href="/report/" target="_blank" rel="noopener">Playwright HTML report ↗</a>
+    </div>
+
+    <div class="sidebar-account">
+      <div class="account-info">
+        <span id="account-name" class="account-name"></span>
+        <span id="account-role" class="account-role"></span>
+      </div>
+      <div class="account-actions">
+        <button id="btn-notifications" class="bell" title="Notifications">🔔<span id="bell-count" class="bell-count" hidden>0</span></button>
+        <button id="btn-manage-users" class="btn-link" hidden>Manage users</button>
+        <button id="btn-logout" class="btn-link">Log out</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div id="empty" class="empty">
+      <div class="empty-icon">▶</div>
+      <p>Select a test or suite on the left, or create a new one.</p>
+    </div>
+
+    <div id="workspace" class="workspace" hidden>
+      <header class="toolbar">
+        <div class="toolbar-title">
+          <input id="test-name" class="input-title" placeholder="Test name" autocomplete="off">
+          <div class="file-row">
+            <span id="test-file" class="file-name"></span>
+            <button id="btn-move-folder" class="btn-link"></button>
+            <span id="access-badge" class="access-badge" hidden>View only</span>
+          </div>
+        </div>
+        <div class="toolbar-actions">
+          <span id="dirty" class="dirty" hidden>Unsaved changes</span>
+          <button id="btn-record" class="btn btn-ghost" title="Record steps in a real browser">⏺ Record</button>
+          <button id="btn-export" class="btn btn-ghost" title="Download this test as JSON">⬇ Export</button>
+          <button id="btn-share" class="btn btn-ghost">🔗 Share</button>
+          <button id="btn-delete" class="btn btn-ghost" title="Delete this test file">Delete</button>
+          <button id="btn-save" class="btn">Save</button>
+          <button id="btn-run" class="btn btn-primary">▶ Run</button>
+          <button id="btn-stop" class="btn btn-danger" hidden>■ Stop</button>
+        </div>
+      </header>
+
+      <div class="panes">
+        <section class="pane pane-steps">
+          <fieldset id="test-fieldset" class="fieldset-reset">
+            <div class="pane-head">
+              <h2>Steps <span id="step-count" class="count"></span></h2>
+              <button id="btn-add-step" class="btn btn-small">+ Add step</button>
+            </div>
+            <input id="test-description" class="input-desc" placeholder="Description (optional)" autocomplete="off">
+            <div id="steps" class="steps"></div>
+          </fieldset>
+        </section>
+
+        <section class="pane pane-run">
+          <div class="pane-head">
+            <h2>Run</h2>
+            <div id="run-status" class="run-status"></div>
+          </div>
+
+          <div id="run-empty" class="muted">No run yet. Press Run to execute this test and watch every step here.</div>
+
+          <div id="run-body" hidden>
+            <div class="run-split">
+              <ol id="run-steps" class="run-steps"></ol>
+              <div class="viewer">
+                <div id="viewer-title" class="viewer-title"></div>
+                <div id="viewer-empty" class="muted">Select a step to see its screenshot.</div>
+                <img id="viewer-img" alt="Step screenshot" hidden>
+                <div id="viewer-error" class="error" hidden>
+                  <div class="error-title">Step failed</div>
+                  <pre id="viewer-error-message"></pre>
+                  <button id="btn-analyze" class="btn btn-small ai-btn" hidden>✨ Analyze with AI</button>
+                  <div id="ai-note" class="muted ai-note" hidden></div>
+                  <div id="ai-analysis" class="ai-analysis" hidden>
+                    <div class="ai-analysis-head">
+                      <span>✨ AI analysis</span>
+                      <span id="ai-model" class="ai-model"></span>
+                    </div>
+                    <p id="ai-summary" class="ai-summary"></p>
+                    <div class="ai-field"><strong>Likely cause</strong><p id="ai-cause"></p></div>
+                    <div class="ai-field"><strong>Suggested fix</strong><p id="ai-fix"></p></div>
+                    <button id="btn-reanalyze" class="btn-link">Re-analyze</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <details class="run-report-box">
+              <summary>Run report</summary>
+              <div id="run-report" class="run-report"></div>
+            </details>
+            <details class="log">
+              <summary>Console log</summary>
+              <pre id="run-log"></pre>
+            </details>
+          </div>
+
+          <div class="pane-head history-head">
+            <h2>History</h2>
+          </div>
+          <ul id="history" class="history"></ul>
+        </section>
+      </div>
+    </div>
+
+    <div id="reports-workspace" class="workspace" hidden>
+      <header class="toolbar">
+        <div class="toolbar-title">
+          <div class="input-title report-title">Reports</div>
+          <div class="file-row"><span id="report-range-label" class="file-name"></span></div>
+        </div>
+      </header>
+      <div class="report-body">
+        <div id="report-cards" class="report-cards"></div>
+        <section class="pane report-pane">
+          <div class="pane-head"><h2>Runs per day</h2></div>
+          <div id="report-trend" class="report-trend"></div>
+        </section>
+        <section class="pane report-pane">
+          <div class="pane-head"><h2>By user</h2></div>
+          <div id="report-users" class="report-table-wrap"></div>
+        </section>
+        <section class="pane report-pane">
+          <div class="pane-head"><h2>Tests</h2></div>
+          <div id="report-tests" class="report-table-wrap"></div>
+        </section>
+        <section class="pane report-pane">
+          <div class="pane-head"><h2>Suites</h2></div>
+          <div id="report-suites" class="report-table-wrap"></div>
+        </section>
+        <section class="pane report-pane">
+          <div class="pane-head"><h2>Recent failures</h2></div>
+          <ul id="report-failures" class="report-failures"></ul>
+        </section>
+      </div>
+    </div>
+
+    <div id="suite-workspace" class="workspace" hidden>
+      <header class="toolbar">
+        <div class="toolbar-title">
+          <input id="suite-name" class="input-title" placeholder="Suite name" autocomplete="off">
+          <div class="file-row">
+            <span id="suite-file" class="file-name"></span>
+          </div>
+        </div>
+        <div class="toolbar-actions">
+          <span id="suite-dirty" class="dirty" hidden>Unsaved changes</span>
+          <button id="btn-suite-delete" class="btn btn-ghost" title="Delete this suite">Delete</button>
+          <button id="btn-suite-save" class="btn">Save</button>
+          <button id="suite-btn-run" class="btn btn-primary">▶ Run</button>
+          <button id="suite-btn-stop" class="btn btn-danger" hidden>■ Stop</button>
+        </div>
+      </header>
+
+      <div class="panes">
+        <section class="pane pane-steps">
+          <div class="pane-head">
+            <h2>Tests in order <span id="suite-test-count" class="count"></span></h2>
+          </div>
+          <input id="suite-description" class="input-desc" placeholder="Description (optional)" autocomplete="off">
+          <label class="suite-continue">
+            <input type="checkbox" id="suite-continue-on-failure">
+            Continue with the remaining tests if one fails
+          </label>
+          <select id="suite-add-test" class="suite-add-select"></select>
+          <div id="suite-tests" class="steps"></div>
+        </section>
+
+        <section class="pane pane-run">
+          <div class="pane-head">
+            <h2>Run</h2>
+            <div id="suite-run-status" class="run-status"></div>
+          </div>
+
+          <div id="suite-run-empty" class="muted">No run yet. Press Run to execute every test in order, in one shared browser session.</div>
+
+          <div id="suite-run-body" hidden>
+            <div class="run-split">
+              <ol id="suite-run-steps" class="run-steps"></ol>
+              <div class="viewer">
+                <div id="suite-viewer-title" class="viewer-title"></div>
+                <div id="suite-viewer-empty" class="muted">Select a step to see its screenshot.</div>
+                <img id="suite-viewer-img" alt="Step screenshot" hidden>
+                <div id="suite-viewer-error" class="error" hidden>
+                  <div class="error-title">Step failed</div>
+                  <pre id="suite-viewer-error-message"></pre>
+                  <button id="suite-btn-analyze" class="btn btn-small ai-btn" hidden>✨ Analyze with AI</button>
+                  <div id="suite-ai-note" class="muted ai-note" hidden></div>
+                  <div id="suite-ai-analysis" class="ai-analysis" hidden>
+                    <div class="ai-analysis-head">
+                      <span>✨ AI analysis</span>
+                      <span id="suite-ai-model" class="ai-model"></span>
+                    </div>
+                    <p id="suite-ai-summary" class="ai-summary"></p>
+                    <div class="ai-field"><strong>Likely cause</strong><p id="suite-ai-cause"></p></div>
+                    <div class="ai-field"><strong>Suggested fix</strong><p id="suite-ai-fix"></p></div>
+                    <button id="suite-btn-reanalyze" class="btn-link">Re-analyze</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <details class="run-report-box">
+              <summary>Run report</summary>
+              <div id="suite-run-report" class="run-report"></div>
+            </details>
+            <details class="log">
+              <summary>Console log</summary>
+              <pre id="suite-run-log"></pre>
+            </details>
+          </div>
+
+          <div class="pane-head history-head">
+            <h2>History</h2>
+          </div>
+          <ul id="suite-history" class="history"></ul>
+        </section>
+      </div>
+    </div>
+  </main>
+
+</div>
+</div>
+
+<div id="notifications-modal" class="modal-overlay" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Notifications</h2>
+      <div class="modal-head-actions">
+        <button id="btn-mark-all-read" class="btn-link">Mark all read</button>
+        <button class="lightbox-close modal-close" id="btn-close-notifications" title="Close">✕</button>
+      </div>
+    </div>
+    <ul id="notifications-list" class="notifications-list"></ul>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
