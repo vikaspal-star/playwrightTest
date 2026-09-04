@@ -1312,7 +1312,16 @@ app.get("/api/runs/:id/events", (req, res) => {
 app.get("/api/reports/summary", (req, res) => {
   requireFeature(req, "reports.view");
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
-  res.json(buildReport(listRuns() as unknown as RunLike[], days));
+  res.json(buildReport(
+    listRuns() as unknown as RunLike[],
+    days,
+    new Map(
+      Object.entries(loadTestMeta()).map(([file, meta]) => [file, meta.folder ?? ""])
+    ),
+    fs.existsSync(JSON_DIR)
+      ? fs.readdirSync(JSON_DIR).filter(f => f.toLowerCase().endsWith(".json"))
+      : []
+  ));
 });
 
 // ---- Notifications ----

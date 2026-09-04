@@ -60,6 +60,25 @@ export interface UserStats {
   lastStatus?: string;
 }
 
+export interface ProjectStats {
+  /** Folder path, or "" for tests that sit at the root. */
+  folder: string;
+  label: string;
+  tests: number;
+  runs: number;
+  finished: number;
+  running: number;
+  passed: number;
+  failed: number;
+  passRate: number | null;
+  stepsExecuted: number;
+  avgDurationMs: number;
+  /** Tests in this project that have never been run in the window. */
+  neverRun: number;
+  lastRunAt?: string;
+  lastStatus?: string;
+}
+
 export interface ReportSummary {
   days: number;
   generatedAt: string;
@@ -75,6 +94,7 @@ export interface ReportSummary {
   perTest: SubjectStats[];
   perSuite: SubjectStats[];
   perUser: UserStats[];
+  perProject: ProjectStats[];
   dailyTrend: { date: string; passed: number; failed: number }[];
   recentFailures: {
     runId: string;
@@ -169,7 +189,79 @@ function statsPerUser(runs: RunLike[]): UserStats[] {
   return out.sort((a, b) => b.runs - a.runs || a.username.localeCompare(b.username));
 }
 
-export function buildReport(allRuns: RunLike[], days: number): ReportSummary {
+/**
+ * Group test runs by the folder their test belongs to. Folders are Test
+ * Studio's notion of a project, so this is the per-project view. Suite runs
+ * are excluded: a suite spans tests and so has no single folder.
+ */
+function statsPerProject(
+  runs: RunLike[],
+  folderOf: Map<string, string>,
+  allTestFiles: string[]
+): ProjectStats[] {
+  const projectOf = (file: string): string => folderOf.get(file) ?? "";
+
+  // Seed every known project, so one with no runs still appears.
+  const byProject = new Map<string, { runs: RunLike[]; tests: Set<string>; ranTests: Set<string> }>();
+  const ensure = (key: string) => {
+    if (!byProject.has(key)) byProject.set(key, { runs: [], tests: new Set(), ranTests: new Set() });
+    return byProject.get(key)!;
+  };
+
+  for (const file of allTestFiles) ensure(projectOf(file)).tests.add(file);
+
+  for (const run of runs) {
+    if ((run.kind ?? "test") !== "test") continue;
+    const entry = ensure(projectOf(run.file));
+    entry.runs.push(run);
+    entry.tests.add(run.file);
+    entry.ranTests.add(run.file);
+  }
+
+  const out: ProjectStats[] = [];
+  for (const [folder, entry] of byProject) {
+    const finished = entry.runs.filter(r => r.status !== "running");
+    const passed = finished.filter(r => r.status === "passed").length;
+    const failed = finished.filter(r => r.status === "failed").length;
+    const withDuration = finished.filter(r => typeof r.durationMs === "number");
+    const newest = [...entry.runs].sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+
+    out.push({
+      folder,
+      label: folder || "(no folder)",
+      tests: entry.tests.size,
+      runs: entry.runs.length,
+      finished: finished.length,
+      running: entry.runs.length - finished.length,
+      passed,
+      failed,
+      passRate: finished.length ? Math.round((passed / finished.length) * 100) : null,
+      stepsExecuted: entry.runs.reduce(
+        (sum, r) => sum + r.steps.filter(s => s.status === "passed" || s.status === "failed").length,
+        0
+      ),
+      avgDurationMs: withDuration.length
+        ? Math.round(withDuration.reduce((sum, r) => sum + (r.durationMs ?? 0), 0) / withDuration.length)
+        : 0,
+      neverRun: [...entry.tests].filter(f => !entry.ranTests.has(f)).length,
+      lastRunAt: newest?.startedAt,
+      lastStatus: newest?.status
+    });
+  }
+
+  // Busiest first, then alphabetically; the root bucket sinks to the bottom.
+  return out.sort((a, b) =>
+    b.runs - a.runs ||
+    (a.folder === "" ? 1 : b.folder === "" ? -1 : a.label.localeCompare(b.label))
+  );
+}
+
+export function buildReport(
+  allRuns: RunLike[],
+  days: number,
+  folderOf: Map<string, string> = new Map(),
+  allTestFiles: string[] = []
+): ReportSummary {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
   const runs = allRuns.filter(r => Date.parse(r.startedAt) >= cutoff);
 
@@ -241,6 +333,7 @@ export function buildReport(allRuns: RunLike[], days: number): ReportSummary {
     perTest: statsFor(runs, "test"),
     perSuite: statsFor(runs, "suite"),
     perUser: statsPerUser(runs),
+    perProject: statsPerProject(runs, folderOf, allTestFiles),
     dailyTrend: [...trendMap.entries()].map(([date, v]) => ({ date, ...v })),
     recentFailures,
     topFailingSteps: [...failureByAction.entries()]

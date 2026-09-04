@@ -1344,3 +1344,20 @@ button, input, select { font: inherit; color: inherit; }
 
 .rr-history { font-size: 12px; }
 .rr-ai .ai-analysis { margin-top: 0; }
+
+/* ---------- per-project report row ---------- */
+
+.report-project { display: flex; align-items: center; gap: 8px; }
+.project-icon { flex: none; font-size: 12px; width: 16px; text-align: center; }
+
+.never-run {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}

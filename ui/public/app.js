@@ -1593,6 +1593,7 @@
       );
     }
 
+    renderProjectTable($("report-projects"), r.perProject || []);
     renderUserTable($("report-users"), r.perUser || []);
     renderReportTable($("report-tests"), r.perTest, "test");
     renderReportTable($("report-suites"), r.perSuite, "suite");
@@ -1625,6 +1626,43 @@
     }
     const cls = passRate >= 80 ? "good" : passRate >= 50 ? "mid" : "bad";
     return el("span", { class: `rate ${cls}`, text: `${passRate}%` });
+  }
+
+  function renderProjectTable(container, rows) {
+    container.replaceChildren();
+    if (!rows.length) {
+      container.append(el("div", { class: "muted", text: "No projects yet. Group tests into folders to see them here." }));
+      return;
+    }
+    const table = el("table", { class: "report-table" },
+      el("thead", {}, el("tr", {},
+        el("th", { text: "Project" }), el("th", { text: "Tests" }), el("th", { text: "Runs" }),
+        el("th", { text: "Passed" }), el("th", { text: "Failed" }), el("th", { text: "Pass rate" }),
+        el("th", { text: "Never run" }), el("th", { text: "Steps" }), el("th", { text: "Avg" }), el("th", { text: "Last run" })
+      ))
+    );
+    const body = el("tbody");
+    for (const row of rows) {
+      body.append(el("tr", {},
+        el("td", {}, el("span", { class: "report-project" },
+          el("span", { class: "project-icon", text: row.folder ? "📁" : "•" }),
+          row.label
+        )),
+        el("td", { text: String(row.tests) }),
+        el("td", { text: String(row.runs) + (row.running ? ` (${row.running} running)` : "") }),
+        el("td", { text: String(row.passed) }),
+        el("td", { text: String(row.failed) }),
+        el("td", {}, rateCell(row.passRate)),
+        el("td", {}, row.neverRun
+          ? el("span", { class: "never-run", title: "Tests in this project with no run in this window", text: String(row.neverRun) })
+          : el("span", { class: "muted", text: "0" })),
+        el("td", { text: String(row.stepsExecuted) }),
+        el("td", { text: fmtMs(row.avgDurationMs) || "—" }),
+        el("td", { text: row.lastRunAt ? fmtRelative(row.lastRunAt) : "—", title: row.lastRunAt ? fmtTime(row.lastRunAt) : "" })
+      ));
+    }
+    table.append(body);
+    container.append(table);
   }
 
   function renderUserTable(container, rows) {

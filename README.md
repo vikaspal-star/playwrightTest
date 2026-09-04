@@ -80,6 +80,7 @@ The **Reports** tab aggregates every stored run over a chosen window: pass rate,
 
 Three breakdowns are included:
 
+- **By project** — one row per folder, since folders are how tests are grouped into projects. Shows how many tests it holds, runs, pass rate, average duration, and a **never run** count so untested work in a project is visible. Suite runs are excluded here: a suite spans tests and so has no single folder.
 - **By user** — runs started, split by test vs suite, passed/failed, pass rate, steps executed, average duration, and last activity. Runs recorded before attribution existed appear as "unattributed".
 - **Tests** and **Suites** — the same per-subject stats.
 
