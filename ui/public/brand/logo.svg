@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 268 64" width="268" height="64" role="img" aria-label="MMQA - QA Automation Studio">
+  <title>MMQA - QA Automation Studio</title>
+  <defs>
+    <linearGradient id="mmqaArcLockup" x1="10" y1="20" x2="54" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0F8EFB"/>
+      <stop offset="0.52" stop-color="#7A4FC8"/>
+      <stop offset="1" stop-color="#EF6B2A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Mark -->
+  <g transform="translate(0 6) scale(0.8125)">
+    <rect width="64" height="64" rx="15" fill="#081120"/>
+    <path d="M10.5 26.5 C 19 12.5, 45 12.5, 53.5 26.5"
+          fill="none" stroke="url(#mmqaArcLockup)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M10.5 20.6 l1.15 2.35 2.35 1.15 -2.35 1.15 -1.15 2.35 -1.15 -2.35 -2.35 -1.15 2.35 -1.15 z" fill="#0F8EFB"/>
+    <path d="M53.5 20.6 l1.15 2.35 2.35 1.15 -2.35 1.15 -1.15 2.35 -1.15 -2.35 -2.35 -1.15 2.35 -1.15 z" fill="#EF6B2A"/>
+    <path d="M19.5 39 L28 47.5 L45.5 29.5"
+          fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="66" y="36"
+        font-family="Poppins, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="27" font-weight="600" letter-spacing="0.4" fill="#081120">MMQA</text>
+
+  <!-- Tagline, set the way the parent brand sets its own -->
+  <text x="67.5" y="50"
+        font-family="Poppins, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="7.6" font-weight="500" letter-spacing="2.15" fill="#5C5C65">QA AUTOMATION STUDIO</text>
+</svg>

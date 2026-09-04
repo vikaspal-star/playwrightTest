@@ -1,4 +1,6 @@
-# playwright-json-framework
+# MMQA — QA Automation Studio
+
+<img src="ui/public/brand/logo.svg" alt="MMQA" width="240">
 
 JSON-driven UI automation on Playwright. Each file in `json/` is one test case:
 
@@ -32,9 +34,9 @@ npm run report           # open the Playwright HTML report
 npm run allure:generate  # build the Allure report from allure-results/
 ```
 
-## Test Studio (web UI)
+## MMQA Studio (web UI)
 
-A local, Reflect-style UI for building and running the JSON tests:
+A local UI for building and running the JSON tests:
 
 ```bash
 npm run ui               # http://localhost:4173
@@ -120,6 +122,11 @@ docker compose up -d
 ```
 
 Starts Postgres (host port **5433**) plus Adminer on http://localhost:8081. Finished runs are mirrored into it for durable history. This is **additive**: run records are always written to `./runs` as JSON, so with Docker stopped the app and all learning still work — it just logs that the database is unavailable. Check the state at `GET /api/db/status`; a site admin can backfill existing runs with `POST /api/db/import`.
+
+
+### Branding
+
+The UI carries Mindmatrix branding: navy `#081120`, the arc gradient running blue `#0F8EFB` through violet `#7A4FC8` into orange `#EF6B2A`, and Poppins type. The MMQA mark pairs that arc with a check for the QA half of the story; it lives in `ui/public/brand/` as `mark.svg` (square, also the favicon) and `logo.svg` (horizontal lockup). Poppins loads from Google Fonts with a system fallback, so the UI still looks right offline.
 
 ## CI
 

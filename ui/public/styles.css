@@ -1,17 +1,27 @@
+/* Mindmatrix brand: navy wordmark, arc gradient from blue through
+   violet into orange, Poppins type. Sampled from mindmatrix.net. */
 :root {
+  --brand-navy: #081120;
+  --brand-navy-soft: #16213a;
+  --brand-orange: #EF6B2A;
+  --brand-orange-dark: #d55c1f;
+  --brand-blue: #0F8EFB;
+  --brand-violet: #7A4FC8;
+  --brand-font: Poppins, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
   --bg: #f5f6f8;
   --panel: #ffffff;
   --border: #e3e6ea;
   --text: #1f2933;
   --muted: #6b7280;
-  --accent: #2563eb;
-  --accent-soft: #e8efff;
+  --accent: #346FE2;
+  --accent-soft: #e7effc;
   --pass: #16a34a;
   --pass-soft: #e6f7ec;
   --fail: #dc2626;
   --fail-soft: #fdecec;
   --warn: #d97706;
-  --run: #2563eb;
+  --run: #346FE2;
   --skip: #9ca3af;
   --radius: 8px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -55,19 +65,39 @@ button, input, select { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border);
 }
 
-.brand-mark {
-  display: inline-grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 13px;
+.brand {
+  background: var(--brand-navy);
+  border-bottom-color: var(--brand-navy);
 }
 
-.brand-name { font-weight: 600; }
-.brand-sub { font-size: 11px; color: var(--muted); }
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 9px;
+}
+
+.brand-name {
+  font-family: var(--brand-font);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: .02em;
+  color: #fff;
+}
+
+.brand-sub {
+  font-family: var(--brand-font);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: #9fb0c9;
+}
+
+/* The auth card sits on light ground, so the lockup inverts there. */
+.auth-brand { background: transparent; border-bottom: none; }
+.auth-brand .brand-name { color: var(--brand-navy); }
+.auth-brand .brand-sub { color: var(--muted); }
 
 .sidebar-actions { padding: 12px 16px 4px; }
 
@@ -149,6 +179,7 @@ button, input, select { font: inherit; color: inherit; }
 .toolbar-actions { display: flex; align-items: center; gap: 8px; }
 
 .input-title {
+  font-family: var(--brand-font);
   width: 100%;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -191,7 +222,13 @@ button, input, select { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border);
 }
 
-.pane-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.pane-head h2 {
+  margin: 0;
+  font-family: var(--brand-font);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--brand-navy);
+}
 .count { color: var(--muted); font-weight: 400; margin-left: 4px; }
 
 .input-desc {
@@ -274,8 +311,13 @@ button, input, select { font: inherit; color: inherit; }
 
 .btn:hover { background: var(--bg); }
 .btn:disabled { opacity: .55; cursor: default; }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn-primary:hover { background: #1d4ed8; }
+.btn-primary {
+  background: var(--brand-orange);
+  border-color: var(--brand-orange);
+  color: #fff;
+  font-weight: 500;
+}
+.btn-primary:hover { background: var(--brand-orange-dark); border-color: var(--brand-orange-dark); }
 .btn-danger { background: var(--fail); border-color: var(--fail); color: #fff; }
 .btn-ghost { border-color: transparent; color: var(--muted); }
 .btn-ghost:hover { color: var(--fail); background: var(--fail-soft); }
