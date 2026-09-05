@@ -45,7 +45,7 @@ npm run ui               # http://localhost:4173
 ```
 
 - Use the persistent navigation to move between Overview, Test library, Suites, and Reports. The overview shows current counts and recent test activity; click a count to open the corresponding library filter.
-- Browse tests in a full-width library with nested folders, wrapping test names, step counts, and last-run status. Search by test name, filename, or folder. Create tests directly, or use **More** to create folders and import JSON.
+- Browse tests in a full-width library with nested folders, wrapping test names, step counts, and last-run status. Search by test name, filename, or folder. Create tests, create folders, and import JSON directly from the library toolbar.
 - Edit steps in a form driven by the action catalog. Returning to the library keeps the current test or suite draft available; reopening it restores your unsaved work. The navigation becomes a drawer on smaller screens.
 - Run a test and watch each step go green (or red) live, with a screenshot captured after every step (click it to zoom), the error text when a step fails, and console log tail.
 - Run history is kept under `runs/<runId>/` (git-ignored). Each single-test run has its own HTML report at `/runs/<runId>/report/`, linked from its run panel. `/report/` is reserved for admin access to legacy CLI reports.
@@ -56,7 +56,7 @@ The UI supplies a private input snapshot and separate output directories to the 
 
 ### Folders
 
-Tests can be organised into nested folders of any depth. Folders are **virtual**: the JSON files stay flat in `json/`, and the folder path is stored as metadata, so `npm test` and CI discover tests exactly as before. Create folders from **Test library → More → New folder**, or use the subfolder control on a folder row. Move a test with the folder button under its name.
+Tests can be organised into nested folders of any depth. Folders are **virtual**: the JSON files stay flat in `json/`, and the folder path is stored as metadata, so `npm test` and CI discover tests exactly as before. Create folders from **Test library → New folder**, or use the subfolder control on a folder row. Move a test with the folder button under its name.
 
 ### Sharing
 
@@ -116,7 +116,7 @@ Without the key set, the button is replaced by a note explaining how to enable i
 ## Recording, importing, and exporting
 
 - **Record steps** (test editor → Test actions): enter a URL and a real browser opens. Clicks, typing, dropdowns, checkboxes, and Enter/Escape/Tab become steps, streamed into the panel live. Password fields are recorded as a step but their value is never captured. Selectors prefer `id`, then test ids, `name`, `aria-label`, placeholder, a unique class, then visible text; a positional fallback is flagged **fragile**. Set `RECORDER_HEADLESS=1` on a machine with no display.
-- **Import JSON** (Test library → More): accepts a Test Studio export or a **Reflect** export. Reflect steps are mapped to the equivalent actions and their descriptions are kept as notes; anything with no faithful equivalent is reported rather than silently dropped.
+- **Import JSON** (Test library toolbar): accepts a Test Studio export or a **Reflect** export. Reflect steps are mapped to the equivalent actions and their descriptions are kept as notes; anything with no faithful equivalent is reported rather than silently dropped.
 - **Export JSON** (test editor → Test actions): downloads the open test as JSON.
 
 Reflect visual comparisons are reported as unsupported because no baseline comparison exists. Scrolls without coordinates and waits without a recorded duration are also reported, rather than assigning fabricated values.

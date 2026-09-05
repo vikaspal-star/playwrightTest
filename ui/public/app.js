@@ -2177,7 +2177,6 @@
     $("btn-new-suite").hidden = !can("suites.manage");
     const importButton = $("btn-import");
     if (importButton) importButton.hidden = !can("tests.create");
-    document.querySelector("#tests-panel .dropdown").hidden = !can("tests.create") && !can("folders.manage");
   }
 
   function wireAccountControls() {
