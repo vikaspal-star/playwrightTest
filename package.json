@@ -8,9 +8,13 @@
     "report": "playwright show-report",
     "ui": "tsx ui/server.ts",
     "typecheck": "tsc --noEmit",
+    "test:unit": "node --import tsx --test tests/unit/*.test.ts",
+    "test:studio": "playwright test --config playwright.studio.config.ts",
+    "check": "npm run typecheck && node --check ui/public/app.js && npm run test:unit",
     "allure:generate": "allure generate allure-results --clean -o allure-report",
     "allure:open": "allure open allure-report"
   },
+  "engines": { "node": ">=22" },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "@types/express": "^5.0.6",

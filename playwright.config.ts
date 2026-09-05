@@ -6,6 +6,8 @@ import {
 export default defineConfig({
 
   testDir: "./tests",
+  testMatch: "json-runner.spec.ts",
+  forbidOnly: !!process.env.CI,
 
   fullyParallel: false,
 

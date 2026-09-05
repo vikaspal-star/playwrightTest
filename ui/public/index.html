@@ -225,6 +225,7 @@
       <button class="tab" data-tab="reports">Reports</button>
     </div>
 
+    <button id="btn-mobile-browse" class="mobile-browse btn" aria-expanded="false" aria-controls="tests-panel suites-panel">Browse tests and suites</button>
     <div id="tests-panel" class="sidebar-panel">
       <div class="sidebar-actions">
         <button id="btn-new" class="btn btn-primary btn-block">+ New test</button>
@@ -266,11 +267,11 @@
         </label>
         <button id="btn-refresh-report" class="btn btn-block btn-secondary-action">Refresh</button>
       </div>
-      <p class="muted report-side-note">Aggregated from every stored run.</p>
+      <p class="muted report-side-note">Aggregated from the runs you can access.</p>
     </div>
 
     <div class="sidebar-footer">
-      <a href="/report/" target="_blank" rel="noopener">Playwright HTML report ↗</a>
+      <button id="btn-overview" class="btn-link">Workspace overview</button>
     </div>
 
     <div class="sidebar-account">
@@ -281,15 +282,18 @@
       <div class="account-actions">
         <button id="btn-notifications" class="bell" title="Notifications">🔔<span id="bell-count" class="bell-count" hidden>0</span></button>
         <button id="btn-manage-users" class="btn-link" hidden>Manage users</button>
+        <button id="btn-password" class="btn-link">Password</button>
         <button id="btn-logout" class="btn-link">Log out</button>
       </div>
     </div>
   </aside>
 
-  <main class="main">
+  <main class="main" id="main-content" tabindex="-1">
     <div id="empty" class="empty">
-      <div class="empty-icon">✓</div>
-      <p>Select a test or suite on the left, or create a new one.</p>
+      <div class="overview-heading"><span class="eyebrow">YOUR QA WORKSPACE</span><h1>Build confidence in every release.</h1><p>Create repeatable tests, run them together, and follow the evidence.</p></div>
+      <div id="overview-stats" class="overview-stats" aria-label="Workspace statistics"></div>
+      <div class="overview-actions"><button id="btn-overview-new" class="btn btn-primary">+ Create a test</button><button id="btn-overview-reports" class="btn">View reports</button></div>
+      <section class="overview-recent"><h2>Recent test activity</h2><div id="overview-recent"></div></section>
     </div>
 
     <div id="workspace" class="workspace" hidden>
@@ -322,6 +326,7 @@
               <button id="btn-add-step" class="btn btn-small">+ Add step</button>
             </div>
             <input id="test-description" class="input-desc" placeholder="Description (optional)" autocomplete="off">
+            <div id="test-validation" class="validation-message" role="alert" hidden></div>
             <div id="steps" class="steps"></div>
           </fieldset>
         </section>
@@ -512,7 +517,20 @@
   </div>
 </div>
 
-<div id="toast" class="toast" hidden></div>
+<div id="password-modal" class="modal-overlay" hidden>
+  <div class="modal">
+    <div class="modal-head"><h2>Change password</h2><button id="btn-close-password" class="btn-icon" title="Close">✕</button></div>
+    <form id="password-form" class="password-form">
+      <label>Current password<input id="password-current" type="password" autocomplete="current-password" required></label>
+      <label>New password<input id="password-new" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+      <label>Confirm new password<input id="password-confirm" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+      <p class="muted">Your other sessions will be signed out.</p>
+      <p id="password-error" class="auth-error" role="alert" hidden></p>
+      <button class="btn btn-primary" type="submit">Update password</button>
+    </form>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>

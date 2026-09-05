@@ -52,17 +52,15 @@ import { RunLike, buildReport } from "./reports";
 import { importTest } from "./importers";
 import * as recorder from "./recorder";
 import { AnalysisResult, analyzeFailure, analyzeRun, isConfigured as aiConfigured } from "./anthropic";
+import { ROOT, WORKSPACE, JSON_DIR, SUITES_DIR, RUNS_DIR, DATA_DIR, HOST, PORT, MAX_ACTIVE_RUNS, RUN_TIMEOUT_MS } from "./config";
+import { readJson, writeJson, acquireWorkspaceLock } from "./storage";
+import { validateTest, ValidationError } from "../src/validation";
+import { securityHeaders, sameOrigin, authRateLimit } from "./security";
 
-const ROOT = path.resolve(__dirname, "..");
-const JSON_DIR = path.join(ROOT, "json");
-const SUITES_DIR = path.join(ROOT, "suites");
-const RUNS_DIR = path.join(ROOT, "runs");
 const PUBLIC_DIR = path.join(__dirname, "public");
-const DATA_DIR = path.join(__dirname, "data");
 const TEST_META_FILE = path.join(DATA_DIR, "testMeta.json");
 const FOLDERS_FILE = path.join(DATA_DIR, "folders.json");
 const PLAYWRIGHT_CLI = path.join(ROOT, "node_modules", "@playwright", "test", "cli.js");
-const PORT = Number(process.env.PORT ?? 4173);
 
 // ------------------------------------------------------------
 // Types
@@ -101,6 +99,9 @@ interface RunRecord {
   log: string[];
   /** Derived from run history when the run finishes. */
   insights?: Insight[];
+  testFiles?: string[];
+  error?: string;
+  sourceAccess?: Record<string, TestMeta>;
 }
 
 interface ActiveRun {
@@ -182,14 +183,6 @@ function requireFeature(req: Request, feature: string): PublicUser {
   return user;
 }
 
-function authGuard(req: Request, res: Response, next: NextFunction): void {
-  if (!currentUser(req)) {
-    res.status(401).json({ error: "Not authenticated" });
-    return;
-  }
-  next();
-}
-
 // ------------------------------------------------------------
 // Sharing / access control
 // ------------------------------------------------------------
@@ -216,12 +209,56 @@ function requireShareAccess(meta: TestMeta, user: PublicUser): void {
   throw new HttpError(403, "Only the creator or an admin can change sharing settings.");
 }
 
+function canReadTest(file: string, user: PublicUser): boolean {
+  return resolveAccess(getTestMeta(file), user) !== null;
+}
+
+function canReadSuite(file: string, user: PublicUser): boolean {
+  try { return readSuite(file).tests.every(test => canReadTest(test, user)); }
+  catch { return isAdminish(user); }
+}
+
+function canReadRun(record: RunRecord, user: PublicUser): boolean {
+  if (isAdminish(user)) return true;
+  const accessible = (file: string) => {
+    const current = getTestMeta(file);
+    const original = record.sourceAccess?.[file];
+    return resolveAccess(original && original.createdAt !== current.createdAt ? original : current, user) !== null;
+  };
+  if (record.kind !== "suite") return accessible(record.file);
+  const files = record.testFiles ?? [...new Set(record.steps.map(step => step.testFile).filter((file): file is string => !!file))];
+  // Old suite records with no source attribution cannot safely be exposed.
+  return files.length > 0 && files.every(accessible);
+}
+
+function requireRun(req: Request): RunRecord {
+  const user = requireAuth(req);
+  const record = loadRun(String(req.params.id));
+  if (!record || !canReadRun(record, user)) throw new HttpError(404, "Run not found");
+  return record;
+}
+
+function requireRecording(req: Request): recorder.RecordingSession {
+  const user = requireAuth(req);
+  const session = recorder.get(String(req.params.id));
+  if (!session || (session.startedBy !== user.username && !isAdminish(user))) throw new HttpError(404, "Recording not found");
+  return session;
+}
+
+function assertRunCapacity(): void {
+  if (activeRuns.size >= MAX_ACTIVE_RUNS) throw new HttpError(429, `All ${MAX_ACTIVE_RUNS} run slots are busy. Wait for a run to finish.`);
+}
+
+function testInUse(file: string): boolean {
+  return [...activeRuns.values()].some(({ record }) => record.kind === "suite"
+    ? record.testFiles?.includes(file) : record.file === file);
+}
+
 // ------------------------------------------------------------
 // Test file helpers
 // ------------------------------------------------------------
 
 const FILE_RE = /^[A-Za-z0-9_.-]+\.json$/;
-const NUMERIC_FIELDS = new Set(["timeout", "x", "y"]);
 
 function safeFile(name: string): string {
   if (!FILE_RE.test(name) || name.includes("..")) {
@@ -244,7 +281,7 @@ function readTest(file: string): TestFile {
   } catch {
     throw new HttpError(422, `Invalid JSON in ${file}`);
   }
-  if (!Array.isArray(parsed.steps)) throw new HttpError(422, `No "steps" array in ${file}`);
+  if (!parsed || !Array.isArray(parsed.steps)) throw new HttpError(422, `No "steps" array in ${file}`);
 
   return {
     file,
@@ -254,43 +291,13 @@ function readTest(file: string): TestFile {
   };
 }
 
-function cleanStep(step: Record<string, unknown>): Record<string, unknown> {
-  // Drop blank fields so saved JSON stays tidy; coerce numeric fields.
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(step)) {
-    if (value === "" || value === null || value === undefined) continue;
-    if (NUMERIC_FIELDS.has(key)) {
-      const n = Number(value);
-      if (!Number.isNaN(n)) out[key] = n;
-      continue;
-    }
-    out[key] = value;
-  }
-  return out;
-}
-
 function validateTestBody(body: unknown): Record<string, unknown> {
-  if (!body || typeof body !== "object") throw new HttpError(400, "Body must be an object");
-  const b = body as { name?: unknown; description?: unknown; steps?: unknown };
-  if (!Array.isArray(b.steps)) throw new HttpError(400, "steps must be an array");
-
-  b.steps.forEach((s, i) => {
-    const action = (s as { action?: unknown })?.action;
-    if (!s || typeof s !== "object" || typeof action !== "string" || !action.trim()) {
-      throw new HttpError(400, `Step ${i + 1} needs an action`);
-    }
-  });
-
-  const out: Record<string, unknown> = {};
-  if (typeof b.name === "string" && b.name.trim()) out.name = b.name.trim();
-  if (typeof b.description === "string" && b.description.trim()) out.description = b.description.trim();
-  out.steps = b.steps.map(s => cleanStep(s as Record<string, unknown>));
-  return out;
+  return validateTest(body);
 }
 
 function writeTest(file: string, data: Record<string, unknown>): void {
   fs.mkdirSync(JSON_DIR, { recursive: true });
-  fs.writeFileSync(testPath(file), JSON.stringify(data, null, 2) + "\n", "utf-8");
+  writeJson(testPath(file), data);
 }
 
 // ------------------------------------------------------------
@@ -298,16 +305,17 @@ function writeTest(file: string, data: Record<string, unknown>): void {
 // ------------------------------------------------------------
 
 function loadTestMeta(): Record<string, TestMeta> {
-  try {
-    return JSON.parse(fs.readFileSync(TEST_META_FILE, "utf-8"));
-  } catch {
-    return {};
+  const meta = readJson<Record<string, TestMeta>>(TEST_META_FILE, {});
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) throw new Error("Invalid test metadata storage.");
+  for (const item of Object.values(meta)) {
+    if (!item || typeof item !== "object" || Array.isArray(item) || (item.visibility !== undefined && !["team", "restricted"].includes(item.visibility)) || (item.sharedWith !== undefined && (!Array.isArray(item.sharedWith) || item.sharedWith.some(grant => !grant || typeof grant.username !== "string" || !["view", "edit"].includes(grant.permission))))) throw new Error("Invalid test sharing metadata. Restore a valid backup.");
   }
+  return meta;
 }
 
 function saveTestMeta(meta: Record<string, TestMeta>): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(TEST_META_FILE, JSON.stringify(meta, null, 2));
+  writeJson(TEST_META_FILE, meta);
 }
 
 function getTestMeta(file: string): TestMeta {
@@ -326,33 +334,23 @@ function touchTestMeta(file: string, username: string, created: boolean, extra: 
   return next;
 }
 
-function removeTestMeta(file: string): void {
-  const all = loadTestMeta();
-  delete all[file];
-  saveTestMeta(all);
-}
-
 // ---- Folders (virtual: files stay flat on disk, this is purely organizational) ----
 
 const FOLDER_SEGMENT_RE = /^[A-Za-z0-9 _.-]+$/;
 
 function loadFolders(): string[] {
-  try {
-    return JSON.parse(fs.readFileSync(FOLDERS_FILE, "utf-8"));
-  } catch {
-    return [];
-  }
+  return readJson<string[]>(FOLDERS_FILE, []);
 }
 
 function saveFolders(list: string[]): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(FOLDERS_FILE, JSON.stringify([...new Set(list)].sort(), null, 2));
+  writeJson(FOLDERS_FILE, [...new Set(list)].sort());
 }
 
 function normalizeFolder(raw: string): string {
   const segments = raw.split("/").map(s => s.trim()).filter(Boolean);
   for (const seg of segments) {
-    if (!FOLDER_SEGMENT_RE.test(seg)) throw new HttpError(400, `Invalid folder name: "${seg}"`);
+    if (!FOLDER_SEGMENT_RE.test(seg) || seg === "." || seg === "..") throw new HttpError(400, `Invalid folder name: "${seg}"`);
   }
   return segments.join("/");
 }
@@ -395,7 +393,8 @@ function readSuite(file: string): SuiteFile {
   } catch {
     throw new HttpError(422, `Invalid JSON in ${file}`);
   }
-  if (!Array.isArray(parsed.tests)) throw new HttpError(422, `No "tests" array in ${file}`);
+  if (!parsed || !Array.isArray(parsed.tests)) throw new HttpError(422, `No "tests" array in ${file}`);
+  if (parsed.tests.some(test => typeof test !== "string" || !FILE_RE.test(test) || test.includes(".."))) throw new HttpError(422, `Invalid test reference in ${file}`);
 
   return {
     file,
@@ -408,15 +407,22 @@ function readSuite(file: string): SuiteFile {
 
 function writeSuite(file: string, data: Record<string, unknown>): void {
   fs.mkdirSync(SUITES_DIR, { recursive: true });
-  fs.writeFileSync(suitePath(file), JSON.stringify(data, null, 2) + "\n", "utf-8");
+  writeJson(suitePath(file), data);
 }
 
-function validateSuiteBody(body: unknown): Record<string, unknown> {
+function validateSuiteBody(body: unknown, user: PublicUser): Record<string, unknown> {
   if (!body || typeof body !== "object") throw new HttpError(400, "Body must be an object");
   const b = body as { name?: unknown; description?: unknown; tests?: unknown; continueOnFailure?: unknown };
   if (!Array.isArray(b.tests)) throw new HttpError(400, "tests must be an array");
 
-  const tests = b.tests.map(t => safeFile(String(t)));
+  if (b.tests.length > 200) throw new HttpError(400, "A suite can contain at most 200 tests.");
+  if (b.continueOnFailure !== undefined && typeof b.continueOnFailure !== "boolean") throw new HttpError(400, "continueOnFailure must be a boolean.");
+  const tests = b.tests.map(t => {
+    if (typeof t !== "string") throw new HttpError(400, "Each suite entry must be a test filename.");
+    const file = safeFile(t);
+    if (!fs.existsSync(testPath(file)) || !canReadTest(file, user)) throw new HttpError(400, `Test unavailable: ${file}`);
+    return file;
+  });
 
   const out: Record<string, unknown> = {};
   if (typeof b.name === "string" && b.name.trim()) out.name = b.name.trim();
@@ -436,13 +442,13 @@ function runPath(id: string): string {
 
 function saveRun(record: RunRecord): void {
   fs.mkdirSync(path.join(RUNS_DIR, record.id), { recursive: true });
-  fs.writeFileSync(runPath(record.id), JSON.stringify(record, null, 2));
+  writeJson(runPath(record.id), record);
 }
 
 function loadRun(id: string): RunRecord | undefined {
   const live = activeRuns.get(id);
   if (live) return live.record;
-  if (!/^[A-Za-z0-9_.-]+$/.test(id)) return undefined;
+  if (!/^[A-Za-z0-9_.-]+$/.test(id) || id.includes("..")) return undefined;
   const p = runPath(id);
   if (!fs.existsSync(p)) return undefined;
   try {
@@ -509,7 +515,13 @@ function sse(res: Response, event: string, data: unknown): void {
 }
 
 function broadcast(run: ActiveRun, event: string, data: unknown): void {
-  for (const res of run.listeners) sse(res, event, data);
+  for (const res of run.listeners) {
+    try {
+      const user = currentUser(res.req);
+      if (!user || !canReadRun(run.record, user)) { run.listeners.delete(res); res.end(); continue; }
+      sse(res, event, data);
+    } catch { run.listeners.delete(res); res.end(); }
+  }
 }
 
 // ------------------------------------------------------------
@@ -517,7 +529,8 @@ function broadcast(run: ActiveRun, event: string, data: unknown): void {
 // ------------------------------------------------------------
 
 function startRun(file: string, startedBy: string): RunRecord {
-  const test = readTest(file);
+  const test = { ...readTest(file), ...validateTest(readTest(file), true) };
+  assertRunCapacity();
   if (isRunning("test", file)) throw new HttpError(409, `${file} is already running`);
   if (!fs.existsSync(PLAYWRIGHT_CLI)) {
     throw new HttpError(500, "Playwright is not installed. Run `npm ci` first.");
@@ -535,6 +548,7 @@ function startRun(file: string, startedBy: string): RunRecord {
     status: "running",
     startedAt: new Date().toISOString(),
     startedBy,
+    sourceAccess: { [file]: getTestMeta(file) },
     steps: test.steps.map((s, i) => ({
       index: i + 1,
       action: String(s.action ?? ""),
@@ -543,29 +557,44 @@ function startRun(file: string, startedBy: string): RunRecord {
     log: []
   };
   saveRun(record);
+  const inputDir = path.join(dir, "input");
+  writeJson(path.join(inputDir, file), { name: test.name, description: test.description, steps: test.steps });
 
   // The spec names every test "Installation: <file>"; anchor the grep to that.
   const grep = `Installation: ${escapeRegex(file)}$`;
 
   const proc: ChildProcess = spawn(
     process.execPath,
-    [PLAYWRIGHT_CLI, "test", "--grep", grep, "--reporter=list,html"],
+    [PLAYWRIGHT_CLI, "test", "--grep", grep, "--reporter=list,html", "--workers=1", "--timeout", String(RUN_TIMEOUT_MS), "--output", path.join(dir, "artifacts")],
     {
       cwd: ROOT,
+      windowsHide: true,
+      detached: process.platform !== "win32",
       env: {
         ...process.env,
         RUN_DIR: dir,
+        TEST_JSON_DIR: inputDir,
+        PLAYWRIGHT_HTML_OUTPUT_DIR: path.join(dir, "report"),
         FORCE_COLOR: "0",
         PLAYWRIGHT_HTML_OPEN: "never"
       }
     }
   );
 
-  const active: ActiveRun = { record, listeners: new Set(), stop: () => proc.kill() };
+  const active: ActiveRun = { record, listeners: new Set(), stop: () => {
+    record.error ??= "Run stopped by user.";
+    if (process.platform === "win32" && proc.pid) {
+      const killer = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      killer.on("error", () => proc.kill());
+    } else if (proc.pid) {
+      try { process.kill(-proc.pid, "SIGKILL"); } catch { proc.kill("SIGKILL"); }
+    }
+  } };
   activeRuns.set(id, active);
 
   const handleLine = (line: string): void => {
     record.log.push(line);
+    if (record.log.length > 2000) record.log.shift();
     broadcast(active, "log", { line });
 
     const running = /^STEP (\d+)\/\d+$/.exec(line);
@@ -600,12 +629,14 @@ function startRun(file: string, startedBy: string): RunRecord {
   proc.stderr?.on("data", chunk => err.push(chunk));
   proc.on("error", e => handleLine(`Failed to start Playwright: ${e.message}`));
 
+  const deadline = setTimeout(() => { record.error = "Run exceeded the configured time limit."; active.stop(); }, RUN_TIMEOUT_MS + 30000);
   proc.on("close", code => {
+    clearTimeout(deadline);
     out.flush();
     err.flush();
 
     record.exitCode = code;
-    record.status = code === 0 ? "passed" : "failed";
+    record.status = code === 0 && !record.error && record.steps.every(step => step.status === "passed") ? "passed" : "failed";
     record.finishedAt = new Date().toISOString();
     record.durationMs = Date.parse(record.finishedAt) - Date.parse(record.startedAt);
 
@@ -708,6 +739,7 @@ function notifyRunFinished(record: RunRecord): void {
 
 function startSuiteRun(file: string, user: PublicUser): RunRecord {
   const suite = readSuite(file);
+  assertRunCapacity();
   if (isRunning("suite", file)) throw new HttpError(409, `${file} is already running`);
   if (!suite.tests.length) throw new HttpError(400, "Add at least one test to the suite before running.");
 
@@ -722,7 +754,8 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
     if (resolveAccess(getTestMeta(testFile), user) === null) {
       throw new HttpError(403, `You don't have access to "${testFile}", which this suite includes.`);
     }
-    resolved.push({ file: testFile, name: test.name || testFile, steps: test.steps as unknown as TestStep[] });
+    const validated = validateTest(test, true);
+    resolved.push({ file: testFile, name: test.name || testFile, steps: validated.steps as unknown as TestStep[] });
   }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").replace("Z", "");
@@ -746,18 +779,22 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
     status: "running",
     startedAt: new Date().toISOString(),
     startedBy: user.username,
+    testFiles: suite.tests,
+    sourceAccess: Object.fromEntries(suite.tests.map(file => [file, getTestMeta(file)])),
     steps,
     log: []
   };
   saveRun(record);
 
   let aborted = false;
+  for (const test of resolved) writeJson(path.join(dir, "input", test.file), { name: test.name, steps: test.steps });
   let closeBrowser: (() => Promise<void>) | null = null;
 
   const active: ActiveRun = {
     record,
     listeners: new Set(),
     stop: () => {
+      record.error ??= "Run stopped by user.";
       aborted = true;
       closeBrowser?.().catch(() => {});
     }
@@ -766,9 +803,11 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
 
   const log = (line: string): void => {
     record.log.push(line);
+    if (record.log.length > 2000) record.log.shift();
     broadcast(active, "log", { line });
   };
 
+  const deadline = setTimeout(() => { record.error = "Suite exceeded the configured time limit."; active.stop(); }, RUN_TIMEOUT_MS);
   void runSuiteSteps();
 
   async function runSuiteSteps(): Promise<void> {
@@ -784,9 +823,12 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
     try {
       browser = await chromium.launch({ headless: true });
       closeBrowser = () => browser!.close();
+      if (aborted) throw new Error(record.error || "Suite stopped.");
       const context = await browser.newContext({ ...devices["Desktop Chrome"] });
+      context.setDefaultTimeout(30000);
+      context.setDefaultNavigationTimeout(60000);
       const page = await context.newPage();
-      const executor = new ActionExecutor(page);
+      const executor = new ActionExecutor(page, dir);
 
       let cursor = 0;
       for (const t of resolved) {
@@ -845,9 +887,11 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
       }
     } catch (e) {
       anyFailure = true;
+      record.error ??= e instanceof Error ? e.message : String(e);
       log(`Suite aborted: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       if (browser) await browser.close().catch(() => {});
+      clearTimeout(deadline);
     }
 
     record.status = anyFailure || aborted ? "failed" : "passed";
@@ -872,7 +916,13 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
 // ------------------------------------------------------------
 
 const app = express();
+app.disable("x-powered-by");
+app.use(securityHeaders);
+app.use("/api", sameOrigin);
 app.use(express.json({ limit: "5mb" }));
+app.use(["/api/auth/setup", "/api/auth/login", "/api/auth/change-password"], authRateLimit());
+
+app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 
 // ---- Auth (public where noted; all self-check `requireAuth`) ----
 
@@ -907,6 +957,7 @@ app.post("/api/auth/change-password", (req, res) => {
   const check = verifyLogin(user.username, String(body.currentPassword ?? ""));
   if (!check) throw new HttpError(401, "Current password is incorrect.");
   changePassword(user.id, String(body.newPassword ?? ""));
+  createSession(user.id, res);
   res.json({ ok: true });
 });
 
@@ -1043,7 +1094,7 @@ app.get("/api/tests", (req, res) => {
         }
         const meta = getTestMeta(file);
         const access = resolveAccess(meta, user);
-        const last = runs.find(r => r.file === file);
+        const last = runs.find(r => r.file === file && canReadRun(r, user));
         return {
           file,
           name,
@@ -1081,11 +1132,10 @@ app.post("/api/tests", (req, res) => {
     name: body.name ?? file.replace(/\.json$/, ""),
     steps: Array.isArray(body.steps) && body.steps.length
       ? body.steps
-      : [{ action: "navigate", url: "https://" }]
+      : []
   });
-  writeTest(file, data);
-
   const folder = typeof body.folder === "string" && body.folder.trim() ? normalizeFolder(body.folder) : undefined;
+  writeTest(file, data);
   if (folder) registerFolder(folder);
   const meta = touchTestMeta(file, user.username, true, folder ? { folder } : {});
 
@@ -1098,7 +1148,7 @@ app.put("/api/tests/:file", (req, res) => {
   if (!fs.existsSync(testPath(file))) throw new HttpError(404, `Test not found: ${file}`);
   const meta = getTestMeta(file);
   if (resolveAccess(meta, user) !== "edit") throw new HttpError(403, "You only have view access to this test.");
-  if (isRunning("test", file)) throw new HttpError(409, `${file} is running; wait for it to finish before saving`);
+  if (testInUse(file)) throw new HttpError(409, `${file} is in an active run; wait for it to finish before saving`);
   writeTest(file, validateTestBody(req.body));
   const nextMeta = touchTestMeta(file, user.username, false);
   res.json({ ...readTest(file), meta: nextMeta, access: "edit" as Access });
@@ -1161,9 +1211,16 @@ app.delete("/api/tests/:file", (req, res) => {
   const file = safeFile(req.params.file);
   if (!fs.existsSync(testPath(file))) throw new HttpError(404, `Test not found: ${file}`);
   requireDeleteAccess(getTestMeta(file), user);
-  if (isRunning("test", file)) throw new HttpError(409, `${file} is running`);
+  if (testInUse(file)) throw new HttpError(409, `${file} is in an active run`);
+  const references = fs.existsSync(SUITES_DIR) ? fs.readdirSync(SUITES_DIR).filter(f => FILE_RE.test(f) && readSuite(f).tests.includes(file)) : [];
+  if (references.length) throw new HttpError(409, "Remove this test from its suites before deleting it.");
+  for (const record of listRuns()) {
+    if (record.file !== file && !record.steps.some(step => step.testFile === file)) continue;
+    record.sourceAccess = { ...record.sourceAccess, [file]: getTestMeta(file) };
+    saveRun(record);
+  }
   fs.unlinkSync(testPath(file));
-  removeTestMeta(file);
+  // Retain sharing metadata so deleting a test cannot expose its historical runs.
   res.status(204).end();
 });
 
@@ -1177,7 +1234,7 @@ app.post("/api/tests/:file/run", (req, res) => {
 // ---- Suites ----
 
 app.get("/api/suites", (req, res) => {
-  requireAuth(req);
+  const user = requireAuth(req);
   fs.mkdirSync(SUITES_DIR, { recursive: true });
   const files = fs
     .readdirSync(SUITES_DIR)
@@ -1186,7 +1243,7 @@ app.get("/api/suites", (req, res) => {
   const runs = listRuns(undefined, "suite");
 
   res.json(
-    files.map(file => {
+    files.filter(file => canReadSuite(file, user)).map(file => {
       let name = "";
       let testCount = 0;
       let error: string | undefined;
@@ -1197,7 +1254,7 @@ app.get("/api/suites", (req, res) => {
       } catch (e) {
         error = (e as Error).message;
       }
-      const last = runs.find(r => r.file === file);
+      const last = runs.find(r => r.file === file && canReadRun(r, user));
       return {
         file,
         name,
@@ -1213,12 +1270,13 @@ app.get("/api/suites", (req, res) => {
 });
 
 app.get("/api/suites/:file", (req, res) => {
-  requireAuth(req);
+  const user = requireAuth(req);
+  if (!canReadSuite(req.params.file, user)) throw new HttpError(404, "Suite not found");
   res.json(readSuite(req.params.file));
 });
 
 app.post("/api/suites", (req, res) => {
-  requireFeature(req, "suites.manage");
+  const user = requireFeature(req, "suites.manage");
   const body = (req.body ?? {}) as { file?: unknown; name?: unknown; tests?: unknown };
   const raw = String(body.file ?? "").trim();
   const file = safeFile(raw.toLowerCase().endsWith(".json") ? raw : `${raw}.json`);
@@ -1228,23 +1286,25 @@ app.post("/api/suites", (req, res) => {
     name: body.name ?? file.replace(/\.json$/, ""),
     tests: Array.isArray(body.tests) ? body.tests : [],
     continueOnFailure: false
-  });
+  }, user);
   writeSuite(file, data);
   res.status(201).json(readSuite(file));
 });
 
 app.put("/api/suites/:file", (req, res) => {
-  requireFeature(req, "suites.manage");
+  const user = requireFeature(req, "suites.manage");
   const file = safeFile(req.params.file);
+  if (!canReadSuite(file, user)) throw new HttpError(404, "Suite not found");
   if (!fs.existsSync(suitePath(file))) throw new HttpError(404, `Suite not found: ${file}`);
   if (isRunning("suite", file)) throw new HttpError(409, `${file} is running; wait for it to finish before saving`);
-  writeSuite(file, validateSuiteBody(req.body));
+  writeSuite(file, validateSuiteBody(req.body, user));
   res.json(readSuite(file));
 });
 
 app.delete("/api/suites/:file", (req, res) => {
-  requireFeature(req, "suites.manage");
+  const user = requireFeature(req, "suites.manage");
   const file = safeFile(req.params.file);
+  if (!canReadSuite(file, user)) throw new HttpError(404, "Suite not found");
   if (!fs.existsSync(suitePath(file))) throw new HttpError(404, `Suite not found: ${file}`);
   if (isRunning("suite", file)) throw new HttpError(409, `${file} is running`);
   fs.unlinkSync(suitePath(file));
@@ -1259,21 +1319,21 @@ app.post("/api/suites/:file/run", (req, res) => {
 // ---- Runs ----
 
 app.get("/api/runs", (req, res) => {
-  requireAuth(req);
+  const user = requireAuth(req);
   const file = typeof req.query.test === "string" ? req.query.test : undefined;
   const kind = req.query.kind === "suite" ? "suite" : req.query.kind === "test" ? "test" : undefined;
-  res.json(listRuns(file, kind).map(summary));
+  res.json(listRuns(file, kind).filter(rec => canReadRun(rec, user)).map(summary));
 });
 
 app.get("/api/runs/:id", (req, res) => {
-  requireAuth(req);
-  const rec = loadRun(req.params.id);
-  if (!rec) throw new HttpError(404, "Run not found");
+  const rec = requireRun(req);
   res.json(rec);
 });
 
 app.post("/api/runs/:id/stop", (req, res) => {
-  requireAuth(req);
+  const rec = requireRun(req);
+  const user = requireFeature(req, rec.kind === "suite" ? "suites.run" : "tests.run");
+  if (rec.startedBy !== user.username && !isAdminish(user)) throw new HttpError(403, "Only the run owner or an admin can stop this run.");
   const active = activeRuns.get(req.params.id);
   if (!active) throw new HttpError(404, "Run is not active");
   active.stop();
@@ -1281,9 +1341,7 @@ app.post("/api/runs/:id/stop", (req, res) => {
 });
 
 app.get("/api/runs/:id/events", (req, res) => {
-  requireAuth(req);
-  const rec = loadRun(req.params.id);
-  if (!rec) throw new HttpError(404, "Run not found");
+  const rec = requireRun(req);
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -1300,7 +1358,11 @@ app.get("/api/runs/:id/events", (req, res) => {
   }
 
   active.listeners.add(res);
-  const ping = setInterval(() => res.write(": ping\n\n"), 15000);
+  const ping = setInterval(() => {
+    const user = currentUser(req);
+    if (!user || !canReadRun(rec, user)) { active.listeners.delete(res); res.end(); return; }
+    res.write(": ping\n\n");
+  }, 15000);
   req.on("close", () => {
     clearInterval(ping);
     active.listeners.delete(res);
@@ -1310,16 +1372,16 @@ app.get("/api/runs/:id/events", (req, res) => {
 // ---- Reports ----
 
 app.get("/api/reports/summary", (req, res) => {
-  requireFeature(req, "reports.view");
+  const user = requireFeature(req, "reports.view");
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
   res.json(buildReport(
-    listRuns() as unknown as RunLike[],
+    listRuns().filter(rec => canReadRun(rec, user)) as unknown as RunLike[],
     days,
     new Map(
-      Object.entries(loadTestMeta()).map(([file, meta]) => [file, meta.folder ?? ""])
+      Object.entries(loadTestMeta()).filter(([file]) => canReadTest(file, user)).map(([file, meta]) => [file, meta.folder ?? ""])
     ),
     fs.existsSync(JSON_DIR)
-      ? fs.readdirSync(JSON_DIR).filter(f => f.toLowerCase().endsWith(".json"))
+      ? fs.readdirSync(JSON_DIR).filter(f => f.toLowerCase().endsWith(".json") && canReadTest(f, user))
       : []
   ));
 });
@@ -1346,7 +1408,8 @@ app.post("/api/tests/import", (req, res) => {
   const user = requireFeature(req, "tests.create");
   const body = (req.body ?? {}) as { file?: unknown; folder?: unknown; content?: unknown };
 
-  const result = importTest(body.content);
+  let result: ReturnType<typeof importTest>;
+  try { result = importTest(body.content); } catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "Invalid import."); }
   if (!result.steps.length) {
     throw new HttpError(422, "That file produced no runnable steps.");
   }
@@ -1371,9 +1434,8 @@ app.post("/api/tests/import", (req, res) => {
     description: result.description,
     steps: result.steps
   });
-  writeTest(file, data);
-
   const folder = typeof body.folder === "string" && body.folder.trim() ? normalizeFolder(body.folder) : undefined;
+  writeTest(file, data);
   if (folder) registerFolder(folder);
   const meta = touchTestMeta(file, user.username, true, folder ? { folder } : {});
 
@@ -1404,14 +1466,12 @@ app.post("/api/record/start", async (req, res) => {
 });
 
 app.get("/api/record/:id", (req, res) => {
-  requireAuth(req);
-  const session = recorder.get(req.params.id);
-  if (!session) throw new HttpError(404, "Recording not found");
+  const session = requireRecording(req);
   res.json(session);
 });
 
 app.post("/api/record/:id/stop", async (req, res) => {
-  requireAuth(req);
+  requireRecording(req);
   const session = await recorder.stop(req.params.id);
   if (!session) throw new HttpError(404, "Recording not found");
   res.json(session);
@@ -1419,9 +1479,7 @@ app.post("/api/record/:id/stop", async (req, res) => {
 
 // Live stream of steps as they are recorded.
 app.get("/api/record/:id/events", (req, res) => {
-  requireAuth(req);
-  const session = recorder.get(req.params.id);
-  if (!session) throw new HttpError(404, "Recording not found");
+  const session = requireRecording(req);
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -1453,12 +1511,12 @@ app.get("/api/record/:id/events", (req, res) => {
 
 // Append what was recorded to a test (or replace its steps).
 app.post("/api/record/:id/apply", (req, res) => {
-  const user = requireAuth(req);
-  const session = recorder.get(req.params.id);
-  if (!session) throw new HttpError(404, "Recording not found");
+  const user = requireFeature(req, "tests.edit");
+  const session = requireRecording(req);
 
   const body = (req.body ?? {}) as { file?: unknown; mode?: unknown; steps?: unknown };
   const file = safeFile(String(body.file ?? ""));
+  if (testInUse(file)) throw new HttpError(409, "Wait for the active run to finish before applying recorded steps.");
   if (!fs.existsSync(testPath(file))) throw new HttpError(404, `Test not found: ${file}`);
   const meta = getTestMeta(file);
   if (resolveAccess(meta, user) !== "edit") throw new HttpError(403, "You only have view access to this test.");
@@ -1481,11 +1539,10 @@ app.post("/api/record/:id/apply", (req, res) => {
 // ---- Per-run report, learning, and database status ----
 
 app.get("/api/runs/:id/report", (req, res) => {
-  requireAuth(req);
-  const rec = loadRun(req.params.id);
-  if (!rec) throw new HttpError(404, "Run not found");
+  const rec = requireRun(req);
+  const user = requireAuth(req);
 
-  const history = listRuns(rec.file, rec.kind ?? "test") as unknown as LearnRun[];
+  const history = listRuns(rec.file, rec.kind ?? "test").filter(run => canReadRun(run, user)) as unknown as LearnRun[];
   res.json({
     report: buildRunReport(rec as unknown as LearnRun),
     insights: rec.insights ?? insightsForRun(rec as unknown as LearnRun, history),
@@ -1494,15 +1551,16 @@ app.get("/api/runs/:id/report", (req, res) => {
 });
 
 app.get("/api/knowledge/:file", (req, res) => {
-  requireAuth(req);
+  const user = requireAuth(req);
   const file = safeFile(req.params.file);
   const kind = req.query.kind === "suite" ? "suite" : "test";
-  const history = listRuns(file, kind) as unknown as LearnRun[];
+  if (!(kind === "suite" ? canReadSuite(file, user) : canReadTest(file, user))) throw new HttpError(404, "Subject not found");
+  const history = listRuns(file, kind).filter(rec => canReadRun(rec, user)) as unknown as LearnRun[];
   res.json(buildKnowledge(file, history));
 });
 
 app.get("/api/db/status", async (req, res) => {
-  requireAuth(req);
+  requireSiteAdmin(req);
   res.json({ ...db.status(), counts: await db.counts() });
 });
 
@@ -1531,8 +1589,7 @@ app.post("/api/db/import", async (req, res) => {
 // Whole-run AI summary (the per-step analyzer is below).
 app.post("/api/runs/:id/summarize", async (req, res) => {
   requireFeature(req, "ai.analyze");
-  const rec = loadRun(req.params.id);
-  if (!rec) throw new HttpError(404, "Run not found");
+  const rec = requireRun(req);
   if (rec.status === "running") throw new HttpError(400, "Wait for the run to finish.");
   if (!aiConfigured()) {
     throw new HttpError(501, "AI is not configured. Set ANTHROPIC_API_KEY on the server and restart.");
@@ -1570,8 +1627,7 @@ app.get("/api/ai/status", (req, res) => {
 
 app.post("/api/runs/:id/steps/:index/analyze", async (req, res) => {
   requireFeature(req, "ai.analyze");
-  const rec = loadRun(req.params.id);
-  if (!rec) throw new HttpError(404, "Run not found");
+  const rec = requireRun(req);
 
   const index = Number(req.params.index);
   const step = Number.isInteger(index) ? rec.steps[index - 1] : undefined;
@@ -1590,7 +1646,7 @@ app.post("/api/runs/:id/steps/:index/analyze", async (req, res) => {
   try {
     const sourceFile = step.testFile ?? rec.file;
     const localIndex = step.testStepIndex ?? index;
-    const test = readTest(sourceFile);
+    const test = readJson<TestFile>(path.join(RUNS_DIR, rec.id, "input", safeFile(sourceFile)), { file: sourceFile, name: "", description: "", steps: [] });
     if (test.steps[localIndex - 1]) stepDef = test.steps[localIndex - 1];
   } catch {
     // Test file may have changed or been deleted since the run; fall back to the bare action.
@@ -1612,9 +1668,14 @@ app.post("/api/runs/:id/steps/:index/analyze", async (req, res) => {
 
 // Static: run screenshots, the Playwright HTML report, ad-hoc screenshots (protected),
 // and the UI shell itself (public, so the login page can load).
-app.use("/runs", authGuard, express.static(RUNS_DIR));
-app.use("/report", authGuard, express.static(path.join(ROOT, "playwright-report")));
-app.use("/screenshots", authGuard, express.static(path.join(ROOT, "screenshots")));
+app.use("/runs/:id", (req, res, next) => {
+  const record = requireRun(req);
+  // Input snapshots, logs and arbitrary host files are never static assets.
+  if (!/^\/step-\d+\.png$/.test(req.path) && !/^\/report(?:\/|$)/.test(req.path)) throw new HttpError(404, "Artifact not found");
+  express.static(path.join(RUNS_DIR, record.id), { fallthrough: false })(req, res, next);
+});
+app.use("/report", (req, _res, next) => { requireAdmin(req); requireFeature(req, "reports.view"); next(); }, express.static(path.join(WORKSPACE, "playwright-report")));
+app.use("/screenshots", (req, _res, next) => { requireAdmin(req); next(); }, express.static(path.join(WORKSPACE, "screenshots")));
 // no-store: this is a dev tool whose UI changes often; stale cached HTML/JS
 // produces confusing "the fix didn't apply" states.
 app.use(express.static(PUBLIC_DIR, {
@@ -1623,15 +1684,48 @@ app.use(express.static(PUBLIC_DIR, {
   setHeaders: res => res.setHeader("Cache-Control", "no-store")
 }));
 
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  const status = err instanceof HttpError ? err.status : 500;
+app.use("/api", (_req, res) => res.status(404).json({ error: "API route not found" }));
+
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  if (res.headersSent) { next(err); return; }
+  const candidate = (err as { status?: number })?.status;
+  const status = err instanceof HttpError || err instanceof ValidationError ? err.status : candidate && candidate >= 400 && candidate < 500 ? candidate : 500;
   const message = err instanceof Error ? err.message : String(err);
   if (status === 500) console.error(err);
-  res.status(status).json({ error: message });
+  res.status(status).json({ error: status === 500 ? "An internal error occurred. Check the server log." : message });
 });
 
-app.listen(PORT, () => {
-  console.log(`Test Studio running at http://localhost:${PORT}`);
+const releaseWorkspace = acquireWorkspaceLock(DATA_DIR);
+process.once("exit", releaseWorkspace);
+
+// Only the process holding the workspace lock may recover interrupted runs.
+for (const record of listRuns()) {
+  if (record.status !== "running") continue;
+  record.status = "failed";
+  record.error = "The server restarted before this run completed.";
+  record.finishedAt = new Date().toISOString();
+  record.durationMs = Date.parse(record.finishedAt) - Date.parse(record.startedAt);
+  for (const step of record.steps) if (step.status === "pending" || step.status === "running") step.status = "skipped";
+  saveRun(record);
+}
+
+const server = app.listen(PORT, HOST, () => {
+  const address = server.address();
+  console.log(`MMQA Studio running at http://${HOST}:${typeof address === "object" && address ? address.port : PORT}`);
   // Optional: the app runs fine on file storage if this never connects.
   void db.init();
+});
+
+let shuttingDown = false;
+for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  for (const active of activeRuns.values()) active.stop();
+  void recorder.stopAll();
+  server.close();
+  const shutdown = setInterval(() => {
+    if (!activeRuns.size) process.exit(0);
+  }, 100);
+  shutdown.unref();
+  setTimeout(() => process.exit(0), 10000).unref();
 });

@@ -7,10 +7,10 @@
 // ============================================================
 
 import crypto from "crypto";
-import fs from "fs";
 import path from "path";
+import { DATA_DIR } from "./config";
+import { readJson, writeJson } from "./storage";
 
-const DATA_DIR = path.join(__dirname, "data");
 const FILE = path.join(DATA_DIR, "notifications.json");
 const MAX_STORED = 500;
 
@@ -29,16 +29,11 @@ export interface Notification {
 }
 
 function load(): Notification[] {
-  try {
-    return JSON.parse(fs.readFileSync(FILE, "utf-8")) as Notification[];
-  } catch {
-    return [];
-  }
+  return readJson<Notification[]>(FILE, []);
 }
 
 function save(items: Notification[]): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(items.slice(0, MAX_STORED), null, 2));
+  writeJson(FILE, items.slice(0, MAX_STORED));
 }
 
 export function notify(

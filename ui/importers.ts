@@ -43,6 +43,7 @@ export function detectFormat(input: unknown): ImportFormat {
   if (!steps.length) return "teststudio";
 
   const first = steps[0] as Record<string, unknown>;
+  if (!first || typeof first !== "object") return "unknown";
   // Ours keys every step by "action"; Reflect keys them by "type".
   if (typeof first.action === "string") return "teststudio";
   if (typeof first.type === "string") return "reflect";
@@ -104,11 +105,9 @@ function mapReflectStep(step: ReflectStep): MappedStep {
         value: step.inputText !== undefined ? String(step.inputText) : ""
       });
 
-    // Reflect compares a screenshot region. We cannot reproduce its baseline,
-    // so assert the element is present instead - the closest honest equivalent.
+    // Presence cannot prove visual equivalence; report unsupported assertions explicitly.
     case "visual-validation":
-      if (!step.selector) return skip("visual validation without a selector");
-      return step_({ action: "visible", selector: step.selector });
+      return skip("visual validation needs a baseline image and has no faithful equivalent");
 
     case "assert-text":
     case "text-validation":
@@ -123,9 +122,8 @@ function mapReflectStep(step: ReflectStep): MappedStep {
       return skip("text validation without a selector or expected text");
 
     case "scroll":
-      // Reflect records the scrolled element, not an offset; a page scroll is
-      // the only faithful translation.
-      return step_({ action: "scroll", y: 500 });
+      if (typeof step.x !== "number" && typeof step.y !== "number") return skip("scroll has no recorded coordinates");
+      return step_({ action: "scroll", ...(typeof step.x === "number" ? { x: step.x } : {}), ...(typeof step.y === "number" ? { y: step.y } : {}) });
 
     case "key-press":
     case "keypress":
@@ -133,7 +131,8 @@ function mapReflectStep(step: ReflectStep): MappedStep {
       return step_({ action: "keyboard-press", key: String(step.expectedText ?? step.inputText) });
 
     case "wait":
-      return step_({ action: "wait", timeout: 3000 });
+      if (typeof step.timeout !== "number" || step.timeout <= 0) return skip("wait has no recorded positive timeout");
+      return step_({ action: "wait", timeout: step.timeout });
 
     default:
       return skip(`unsupported Reflect step type "${step.type}"`);

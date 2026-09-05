@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { validateTest } from "./validation";
 
 import {
   Page
@@ -113,8 +114,7 @@ export class JsonRunner {
 
     try {
 
-      testCase =
-        JSON.parse(content);
+      testCase = JSON.parse(content);
 
     } catch {
 
@@ -129,16 +129,7 @@ export class JsonRunner {
     // VALIDATE STEPS
     // ======================================
 
-    if (
-      !testCase.steps ||
-      !Array.isArray(testCase.steps)
-    ) {
-
-      throw new Error(
-        `No valid "steps" array found in ${jsonPath}`
-      );
-
-    }
+    testCase = validateTest(testCase, true) as unknown as TestCase;
 
 
     console.log(

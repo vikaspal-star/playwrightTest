@@ -121,10 +121,10 @@ export async function reconnect(): Promise<void> {
 }
 
 /** Mirror a finished run into the database. Failures are logged, never thrown. */
-export async function saveRun(run: RunRow): Promise<void> {
-  if (!isReady() || !pool) return;
+export async function saveRun(run: RunRow): Promise<boolean> {
+  if (!isReady() || !pool) return false;
   const client = await pool.connect().catch(() => null);
-  if (!client) return;
+  if (!client) return false;
   try {
     await client.query("BEGIN");
     await client.query(
@@ -152,10 +152,12 @@ export async function saveRun(run: RunRow): Promise<void> {
       );
     }
     await client.query("COMMIT");
+    return true;
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     lastError = e instanceof Error ? e.message : String(e);
     console.error("Failed to store run in the database:", lastError);
+    return false;
   } finally {
     client.release();
   }
@@ -178,8 +180,7 @@ export async function importRuns(runs: RunRow[]): Promise<number> {
   if (!isReady()) return 0;
   let n = 0;
   for (const run of runs) {
-    await saveRun(run);
-    n++;
+    if (await saveRun(run)) n++;
   }
   return n;
 }

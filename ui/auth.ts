@@ -14,12 +14,13 @@
 // ============================================================
 
 import crypto from "crypto";
-import fs from "fs";
 import path from "path";
 import { IncomingMessage, ServerResponse } from "http";
 import { FEATURE_IDS, Role, effectiveFeatures } from "./features";
+import { DATA_DIR } from "./config";
+import { readJson, writeJson } from "./storage";
+import { ValidationError } from "../src/validation";
 
-const DATA_DIR = path.join(__dirname, "data");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 
@@ -59,21 +60,11 @@ interface Session {
 // Storage
 // ------------------------------------------------------------
 
-function readJson<T>(file: string, fallback: T): T {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf-8")) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(file: string, data: unknown): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
 function loadUsers(): User[] {
   const users = readJson<User[]>(USERS_FILE, []);
+  if (!Array.isArray(users) || users.some(u => !u || typeof u.id !== "string" || typeof u.username !== "string" || !["site_admin", "admin", "member"].includes(u.role))) {
+    throw new Error("Invalid user storage. Restore a valid backup before continuing.");
+  }
   if (!users.length) return users;
 
   // Migration for accounts created before site_admin existed: the earliest
@@ -131,6 +122,7 @@ export function validatePassword(password: string): string | null {
   if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
     return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
   }
+  if (password.length > 256) return "Password must be at most 256 characters.";
   return null;
 }
 
@@ -161,10 +153,11 @@ export function findUserById(id: string): User | undefined {
 
 export function createUser(username: string, password: string, role: Role, features?: string[]): PublicUser {
   const clean = username.trim();
-  if (!clean) throw new Error("Username is required.");
-  if (findUserByUsername(clean)) throw new Error(`User "${clean}" already exists.`);
+  if (!clean) throw new ValidationError("Username is required.");
+  if (clean.length > 80 || /[\x00-\x1f]/.test(clean)) throw new ValidationError("Username must be at most 80 characters without control characters.");
+  if (findUserByUsername(clean)) throw new ValidationError(`User "${clean}" already exists.`);
   const pwError = validatePassword(password);
-  if (pwError) throw new Error(pwError);
+  if (pwError) throw new ValidationError(pwError);
 
   const salt = crypto.randomBytes(16).toString("hex");
   const user: User = {
@@ -187,11 +180,11 @@ export function createUser(username: string, password: string, role: Role, featu
 export function updateUser(id: string, changes: { role?: Role; features?: string[] | null }): PublicUser {
   const users = loadUsers();
   const user = users.find(u => u.id === id);
-  if (!user) throw new Error("User not found.");
+  if (!user) throw new ValidationError("User not found.");
 
   if (changes.role && changes.role !== user.role) {
     if (user.role === "site_admin" && users.filter(u => u.role === "site_admin").length <= 1) {
-      throw new Error("Promote another account to site admin first.");
+      throw new ValidationError("Promote another account to site admin first.");
     }
     user.role = changes.role;
   }
@@ -208,9 +201,9 @@ export function updateUser(id: string, changes: { role?: Role; features?: string
 export function deleteUser(id: string): void {
   const users = loadUsers();
   const target = users.find(u => u.id === id);
-  if (!target) throw new Error("User not found.");
+  if (!target) throw new ValidationError("User not found.");
   if (target.role === "site_admin" && users.filter(u => u.role === "site_admin").length <= 1) {
-    throw new Error("Cannot remove the last site admin.");
+    throw new ValidationError("Cannot remove the last site admin.");
   }
   saveUsers(users.filter(u => u.id !== id));
 
@@ -223,16 +216,22 @@ export function deleteUser(id: string): void {
 
 export function changePassword(id: string, newPassword: string): void {
   const pwError = validatePassword(newPassword);
-  if (pwError) throw new Error(pwError);
+  if (pwError) throw new ValidationError(pwError);
   const users = loadUsers();
   const user = users.find(u => u.id === id);
-  if (!user) throw new Error("User not found.");
+  if (!user) throw new ValidationError("User not found.");
   user.salt = crypto.randomBytes(16).toString("hex");
   user.passwordHash = hashPassword(newPassword, user.salt);
   saveUsers(users);
+  const sessions = loadSessions();
+  for (const [token, session] of Object.entries(sessions)) {
+    if (session.userId === id) delete sessions[token];
+  }
+  saveSessions(sessions);
 }
 
 export function verifyLogin(username: string, password: string): User | null {
+  if (username.length > 80 || password.length > 256) return null;
   const user = findUserByUsername(username);
   if (!user) return null;
   return verifyPassword(password, user.salt, user.passwordHash) ? user : null;
@@ -244,14 +243,16 @@ export function verifyLogin(username: string, password: string): User | null {
 
 function parseCookies(req: IncomingMessage): Record<string, string> {
   const header = req.headers.cookie;
-  const out: Record<string, string> = {};
+  const out: Record<string, string> = Object.create(null);
   if (!header) return out;
   for (const part of header.split(";")) {
     const idx = part.indexOf("=");
     if (idx === -1) continue;
     const key = part.slice(0, idx).trim();
     const value = part.slice(idx + 1).trim();
-    if (key) out[key] = decodeURIComponent(value);
+    if (key) {
+      try { out[key] = decodeURIComponent(value); } catch { /* Ignore malformed cookies. */ }
+    }
   }
   return out;
 }
@@ -265,7 +266,7 @@ export function createSession(userId: string, res: ServerResponse): void {
   const maxAge = Math.floor(SESSION_TTL_MS / 1000);
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax`
+    `${SESSION_COOKIE}=${token}; HttpOnly; Path=/; Max-Age=${maxAge}; SameSite=Lax${process.env.COOKIE_SECURE === "1" ? "; Secure" : ""}`
   );
 }
 
@@ -276,13 +277,13 @@ export function destroySession(req: IncomingMessage, res: ServerResponse): void 
     delete sessions[token];
     saveSessions(sessions);
   }
-  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`);
+  res.setHeader("Set-Cookie", `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${process.env.COOKIE_SECURE === "1" ? "; Secure" : ""}`);
 }
 
 /** Resolve the current request's user from its session cookie, if any. */
 export function currentUser(req: IncomingMessage): PublicUser | null {
   const token = parseCookies(req)[SESSION_COOKIE];
-  if (!token) return null;
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
   const sessions = loadSessions();
   const session = sessions[token];
   if (!session || session.expires < Date.now()) return null;

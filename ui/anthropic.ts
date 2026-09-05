@@ -63,7 +63,9 @@ function extractJson(text: string): Partial<AnalysisResult> {
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end < start) return {};
   try {
-    return JSON.parse(text.slice(start, end + 1));
+    const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value === "string"));
   } catch {
     return {};
   }
@@ -86,6 +88,7 @@ export async function analyzeFailure(ctx: FailureContext): Promise<AnalysisResul
   }
 
   const res = await fetch(`${API_BASE}/v1/messages`, {
+    signal: AbortSignal.timeout(45000),
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -207,6 +210,7 @@ export async function analyzeRun(ctx: RunContext): Promise<RunAnalysis> {
   }
 
   const res = await fetch(`${API_BASE}/v1/messages`, {
+    signal: AbortSignal.timeout(45000),
     method: "POST",
     headers: {
       "content-type": "application/json",

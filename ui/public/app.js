@@ -243,6 +243,11 @@
     if (tab === "reports") openReports();
   }
 
+  function mobileNavigation(open) {
+    document.querySelector(".sidebar").classList.toggle("nav-open", open);
+    $("btn-mobile-browse").setAttribute("aria-expanded", String(open));
+  }
+
   // ---------------------------------------------------------
   // Sidebar: tests, organized into a virtual folder tree
   // ---------------------------------------------------------
@@ -250,6 +255,17 @@
   async function loadTests() {
     state.tests = await api("/api/tests");
     renderTestList();
+    renderOverview();
+  }
+
+  function renderOverview() {
+    const tests = state.tests;
+    const stats = [["Tests", tests.length], ["Passed last run", tests.filter(t => testStatus(t) === "passed").length], ["Need attention", tests.filter(t => t.error || testStatus(t) === "failed").length], ["Never run", tests.filter(t => !t.lastRun && !t.running).length]];
+    $("overview-stats").replaceChildren(...stats.map(([label, value]) => el("div", { class: "overview-stat" }, el("strong", { text: value }), el("span", { text: label }))));
+    $("btn-overview-new").hidden = !can("tests.create");
+    $("btn-overview-reports").hidden = !can("reports.view");
+    const recent = [...tests].sort((a, b) => (b.lastRun?.startedAt || "").localeCompare(a.lastRun?.startedAt || "")).slice(0, 6);
+    $("overview-recent").replaceChildren(...(recent.length ? recent.map(t => el("button", { class: "overview-test", onclick: () => openTest(t.file) }, el("span", { text: t.name || t.file }), el("span", { class: `badge ${testStatus(t)}`, text: t.error ? "Invalid test" : t.lastRun ? testStatus(t) : "Not run" }))) : [el("p", { class: "muted", text: "Your first test starts here. Create one or import an existing JSON test from the sidebar." })]));
   }
 
   async function loadFolders() {
@@ -419,18 +435,19 @@
   // ---------------------------------------------------------
 
   function applyAccessMode() {
-    const readOnly = state.test.access !== "edit";
+    const readOnly = state.test.access !== "edit" || !can("tests.edit");
     $("test-fieldset").disabled = readOnly;
     $("test-name").disabled = readOnly;
     $("btn-save").disabled = readOnly;
-    $("btn-move-folder").disabled = readOnly;
-    $("btn-record").hidden = readOnly;
+    $("btn-move-folder").disabled = readOnly || !can("folders.manage");
+    $("btn-record").hidden = readOnly || !can("tests.create");
     $("access-badge").hidden = !readOnly;
 
-    const isOwnerOrAdmin = state.user.role === "admin" ||
+    const isOwnerOrAdmin = ["admin", "site_admin"].includes(state.user.role) ||
       (state.test.meta && state.test.meta.createdBy === state.user.username);
     $("btn-share").hidden = !isOwnerOrAdmin;
-    $("btn-delete").hidden = !isOwnerOrAdmin;
+    $("btn-delete").hidden = !isOwnerOrAdmin || !can("tests.delete");
+    $("btn-run").disabled = !can("tests.run");
   }
 
   function renderTestMeta() {
@@ -459,6 +476,7 @@
     $("suite-workspace").hidden = true;
     $("reports-workspace").hidden = true;
     $("workspace").hidden = false;
+    mobileNavigation(false);
     $("test-name").value = state.test.name || "";
     $("test-description").value = state.test.description || "";
     $("test-file").textContent = `json/${file}`;
@@ -495,7 +513,8 @@
   }
 
   async function saveTest() {
-    if (!state.file) return;
+    if (!state.file || !can("tests.edit") || state.test.access !== "edit") return false;
+    $("test-validation").hidden = true;
     const body = {
       name: $("test-name").value,
       description: $("test-description").value,
@@ -513,6 +532,11 @@
       toast("Saved", "ok");
       return true;
     } catch (e) {
+      $("test-validation").textContent = e.message;
+      $("test-validation").hidden = false;
+      const match = /Step (\d+)/.exec(e.message);
+      const card = match && $("steps").children[Number(match[1]) - 1];
+      if (card) { card.classList.add("invalid"); card.scrollIntoView({ block: "nearest" }); card.querySelector("input, select")?.focus(); }
       toast(e.message, "error");
       return false;
     }
@@ -651,6 +675,7 @@
   // ---------------------------------------------------------
 
   function renderSteps() {
+    $("test-validation").hidden = true;
     const container = $("steps");
     container.replaceChildren();
     const steps = state.test.steps;
@@ -711,10 +736,14 @@
 
     input.addEventListener("input", () => {
       const v = input.value;
-      if (v === "") delete state.test.steps[index][name];
+      if (v === "" && !["value", "text", "message", "promptText"].includes(name)) delete state.test.steps[index][name];
       else state.test.steps[index][name] = meta.type === "number" ? Number(v) : v;
       setDirty(true);
     });
+    input.id = `step-${index}-${name}`;
+    label.htmlFor = input.id;
+    if (required) input.setAttribute("aria-required", "true");
+    if (name === "timeout") { input.min = "1"; input.max = "600000"; }
 
     const wide = ["selector", "url", "value", "text"].includes(name);
     return el("div", { class: `field${wide ? " span-2" : ""}` }, label, input);
@@ -740,6 +769,7 @@
     }
 
     const select = actionSelect(name);
+    select.setAttribute("aria-label", `Step ${index + 1} action`);
     select.addEventListener("change", () => {
       state.test.steps[index].action = select.value;
       setDirty(true);
@@ -832,7 +862,7 @@
     pel(panel, "runEmpty").hidden = false;
     pel(panel, "runStatus").replaceChildren();
     pel(panel, "btnStop").hidden = true;
-    pel(panel, "btnRun").disabled = false;
+    pel(panel, "btnRun").disabled = !can(panel.kind === "suite" ? "suites.run" : "tests.run");
   }
 
   function attachRun(panel, id, { live }) {
@@ -885,15 +915,17 @@
     pel(panel, "runBody").hidden = false;
 
     const running = run.status === "running";
-    pel(panel, "btnRun").disabled = running;
-    pel(panel, "btnStop").hidden = !running;
+    pel(panel, "btnRun").disabled = running || !can(panel.kind === "suite" ? "suites.run" : "tests.run");
+    pel(panel, "btnStop").hidden = !running || !can(panel.kind === "suite" ? "suites.run" : "tests.run") || (run.startedBy !== state.user.username && !["admin", "site_admin"].includes(state.user.role));
 
     const passedCount = run.steps.filter(s => s.status === "passed").length;
     pel(panel, "runStatus").replaceChildren(
       el("span", { class: `badge ${run.status}`, text: run.status }),
       el("span", { text: `${passedCount}/${run.steps.length} steps` }),
       el("span", { text: running ? `started ${fmtRelative(run.startedAt)}` : fmtMs(run.durationMs), title: fmtTime(run.startedAt) }),
-      run.startedBy ? el("span", { text: `by ${run.startedBy}` }) : null
+      run.startedBy ? el("span", { text: `by ${run.startedBy}` }) : null,
+      run.error ? el("span", { class: "validation-message", text: run.error }) : null,
+      !running && run.kind !== "suite" ? el("a", { href: `/runs/${encodeURIComponent(run.id)}/report/index.html`, target: "_blank", rel: "noopener", text: "HTML report ↗" }) : null
     );
 
     if (panel.follow) {
@@ -1374,6 +1406,7 @@
     $("workspace").hidden = true;
     $("reports-workspace").hidden = true;
     $("suite-workspace").hidden = false;
+    mobileNavigation(false);
     $("suite-name").value = state.suite.name || "";
     $("suite-description").value = state.suite.description || "";
     $("suite-continue-on-failure").checked = Boolean(state.suite.continueOnFailure);
@@ -1415,6 +1448,10 @@
       );
     });
     renderSuiteAddOptions();
+    const editable = can("suites.manage");
+    for (const id of ["suite-name", "suite-description", "suite-continue-on-failure", "suite-add-test", "btn-suite-save"]) $(id).disabled = !editable;
+    $("btn-suite-delete").hidden = !editable;
+    for (const button of container.querySelectorAll("button")) if (!editable) button.disabled = true;
   }
 
   function moveSuiteTest(from, to) {
@@ -1460,7 +1497,7 @@
   }
 
   async function saveSuite() {
-    if (!state.suiteFile) return;
+    if (!state.suiteFile || !can("suites.manage")) return false;
     const body = {
       name: $("suite-name").value,
       description: $("suite-description").value,
@@ -2098,9 +2135,32 @@
     $("btn-new").hidden = !can("tests.create");
     $("btn-new-folder").hidden = !can("folders.manage");
     $("btn-new-suite").hidden = !can("suites.manage");
+    const importButton = $("btn-import");
+    if (importButton) importButton.hidden = !can("tests.create");
   }
 
   function wireAccountControls() {
+    $("btn-password").addEventListener("click", () => {
+      $("password-form").reset();
+      $("password-error").hidden = true;
+      $("password-modal").hidden = false;
+    });
+    $("btn-close-password").addEventListener("click", () => { $("password-modal").hidden = true; });
+    $("password-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const error = $("password-error");
+      error.hidden = true;
+      if ($("password-new").value !== $("password-confirm").value) { error.textContent = "The new passwords do not match."; error.hidden = false; return; }
+      const button = event.submitter;
+      button.disabled = true;
+      try {
+        await api("/api/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword: $("password-current").value, newPassword: $("password-new").value }) });
+        $("password-form").reset();
+        $("password-modal").hidden = true;
+        toast("Password updated. Other sessions signed out.", "ok");
+      } catch (e) { error.textContent = e.message; error.hidden = false; }
+      finally { button.disabled = false; }
+    });
     $("btn-logout").addEventListener("click", async () => {
       try {
         await authApi("/api/auth/logout", {});
@@ -2170,7 +2230,7 @@
           el("button", {
             class: "btn-icon",
             title: isSelf ? "You cannot delete your own account" : "Delete user",
-            disabled: isSelf,
+            disabled: isSelf || (u.role !== "member" && state.user.role !== "site_admin"),
             onclick: async () => {
               const ok = await confirmDialog(`Delete user "${u.username}"?`, { title: "Delete user", okLabel: "Delete", danger: true });
               if (!ok) return;
@@ -2362,6 +2422,7 @@
   }
 
   async function boot() {
+    wireAccessibleDialogs();
     wireAuthForms();
 
     let status;
@@ -2407,6 +2468,14 @@
     }
 
     $("btn-new").addEventListener("click", () => createTest());
+    $("btn-mobile-browse").addEventListener("click", () => mobileNavigation($("btn-mobile-browse").getAttribute("aria-expanded") !== "true"));
+    $("btn-overview-new").addEventListener("click", () => createTest());
+    $("btn-overview-reports").addEventListener("click", () => switchTab("reports"));
+    $("btn-overview").addEventListener("click", () => {
+      for (const id of ["workspace", "suite-workspace", "reports-workspace"]) $(id).hidden = true;
+      $("empty").hidden = false;
+      renderOverview();
+    });
     $("btn-save").addEventListener("click", saveTest);
     $("btn-run").addEventListener("click", runTest);
     $("btn-stop").addEventListener("click", stopRun);
@@ -2441,8 +2510,8 @@
     document.addEventListener("keydown", e => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        if (state.file) saveTest();
-        else if (state.suiteFile) saveSuite();
+        if (!$("workspace").hidden && state.file) saveTest();
+        else if (!$("suite-workspace").hidden && state.suiteFile) saveSuite();
       }
       if (e.key === "Escape") closeLightbox();
     });
@@ -2463,6 +2532,36 @@
       if (state.suites.some(s => s.file === file)) await openSuite(file, { force: true });
     } else if (fromHash && state.tests.some(t => t.file === fromHash)) {
       await openTest(fromHash, { force: true });
+    }
+  }
+
+  function wireAccessibleDialogs() {
+    for (const input of document.querySelectorAll("input, select")) {
+      if (!input.labels?.length && !input.hasAttribute("aria-label")) input.setAttribute("aria-label", input.placeholder || input.id.replaceAll("-", " "));
+    }
+    for (const overlay of document.querySelectorAll(".modal-overlay")) {
+      const dialog = overlay.querySelector(".modal");
+      if (!dialog) continue;
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("aria-modal", "true");
+      dialog.tabIndex = -1;
+      const title = dialog.querySelector("h2");
+      if (title) { title.id ||= `${overlay.id}-title`; dialog.setAttribute("aria-labelledby", title.id); }
+      let previousFocus;
+      new MutationObserver(() => {
+        if (!overlay.hidden) {
+          if (!overlay.contains(document.activeElement)) previousFocus = document.activeElement;
+          (dialog.querySelector("input:not([hidden]), button:not([disabled]), select") || dialog).focus();
+        } else if (previousFocus?.isConnected) previousFocus.focus();
+      }).observe(overlay, { attributes: true, attributeFilter: ["hidden"] });
+      overlay.addEventListener("keydown", event => {
+        if (event.key !== "Tab") return;
+        const focusable = [...dialog.querySelectorAll("button, input, select, a[href], [tabindex='0']")].filter(node => !node.disabled && node.getClientRects().length);
+        const first = focusable[0], last = focusable[focusable.length - 1];
+        if (!first) { event.preventDefault(); dialog.focus(); }
+        else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      });
     }
   }
 

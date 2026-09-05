@@ -11,7 +11,7 @@ import {
 
 
 const jsonFolder =
-  path.resolve("./json");
+  path.resolve(process.env.TEST_JSON_DIR || path.join(process.env.STUDIO_WORKSPACE || ".", "json"));
 
 
 const jsonFiles =

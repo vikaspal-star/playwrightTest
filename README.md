@@ -20,6 +20,8 @@ JSON-driven UI automation on Playwright. Each file in `json/` is one test case:
 
 ## Setup
 
+Requires Node.js 22 or newer (CI uses Node 24).
+
 ```bash
 npm ci
 npx playwright install chromium
@@ -42,11 +44,13 @@ A local UI for building and running the JSON tests:
 npm run ui               # http://localhost:4173
 ```
 
-- Browse every test in `json/`, search/filter by status, create new ones, and edit steps in a form driven by the action catalog.
+- See test counts, last-run outcomes, and recent activity in the workspace overview. Browse tests in `json/`, search/filter by status, create new ones, and edit steps in a form driven by the action catalog.
 - Run a test and watch each step go green (or red) live, with a screenshot captured after every step (click it to zoom), the error text when a step fails, and console log tail.
-- Run history is kept under `runs/<runId>/` (git-ignored). The Playwright HTML report for the last run is served at `/report/`.
+- Run history is kept under `runs/<runId>/` (git-ignored). Each single-test run has its own HTML report at `/runs/<runId>/report/`, linked from its run panel. `/report/` is reserved for admin access to legacy CLI reports.
 
-The UI runs the exact same Playwright command as CI. It sets `RUN_DIR`, which makes `src/JsonRunner.ts` write per-step screenshots and emit `@@STEP` progress lines; plain CLI runs are unaffected.
+The UI uses the same Playwright JSON runner as the CLI. It sets `RUN_DIR`, which makes `src/JsonRunner.ts` write per-step screenshots and emit `@@STEP` progress lines; plain CLI runs are unaffected.
+
+The UI supplies a private input snapshot and separate output directories to the same JSON runner used by the CLI. Concurrent tests cannot overwrite one another's reports. An empty test can be saved as a draft; running requires at least one valid step. Saving and execution both validate actions against the catalog, including required fields and bounded timeouts. Intentional empty input values are preserved.
 
 ### Folders
 
@@ -70,11 +74,15 @@ Three roles, in a ladder:
 | --- | --- |
 | Site admin | Everything. The only role that can create admins or change anyone's feature access. |
 | Admin | Day-to-day administration: users, tests, suites, reports. |
-| Member | Only what the site admin grants. Defaults to running tests and suites and viewing reports. |
+| Member | Only what the site admin grants. Defaults include creating/editing/running tests, managing folders, running suites, and viewing reports. |
 
 Feature access is granular. The site admin opens the gear next to a user in **Manage users** and ticks the features that account may use: creating, editing, deleting or running tests, managing folders and suites, viewing reports, using AI analysis, and managing users. Every one of those is enforced server-side.
 
 This is good local-tool hygiene, not a hardened multi-tenant auth system — don't expose this server beyond your own machine/network without more thought.
+
+The server binds to `127.0.0.1` by default. Passwords can be changed from **Password** in the account area; a change revokes other sessions and renews the current one. Authentication attempts are rate limited, browser mutations require the same origin, and responses include security headers. Restricted-test access also governs related suites, historical runs, event streams, screenshots, reports, and AI routes. Recordings belong to their creator; applying them requires test-edit access. Only a run's starter or an admin with the run feature can stop it.
+
+File storage supports one server process per workspace. Writes replace complete JSON files atomically. Invalid account or sharing storage fails closed rather than silently resetting access. On restart, interrupted runs are marked failed with an explanation. Retained sharing metadata protects history after a test is deleted or its filename is reused.
 
 ### Reports
 
@@ -109,6 +117,8 @@ Without the key set, the button is replaced by a note explaining how to enable i
 - **Import JSON** (sidebar): accepts a Test Studio export or a **Reflect** export. Reflect steps are mapped to the equivalent actions and their descriptions are kept as notes; anything with no faithful equivalent is reported rather than silently dropped.
 - **Export** (test toolbar): downloads the open test as JSON.
 
+Reflect visual comparisons are reported as unsupported because no baseline comparison exists. Scrolls without coordinates and waits without a recorded duration are also reported, rather than assigning fabricated values.
+
 ## Per-run report
 
 Every finished run gets a report (in the run panel, and at `GET /api/runs/:id/report`): time spent split into step time versus startup/teardown, steps passed/failed/skipped, the slowest steps with their share of the runtime, time grouped by action, and a per-test breakdown for suites.
@@ -130,4 +140,33 @@ The UI carries Mindmatrix branding: navy `#081120`, the arc gradient running blu
 
 ## CI
 
-`.github/workflows/playwright.yml` runs the suite on every push and pull request to `main` and uploads the Playwright and Allure reports as artifacts.
+`.github/workflows/playwright.yml` runs typechecking, JavaScript syntax checks, core regression tests, dependency auditing, and the Studio browser/API tests on every push and pull request to `main`. A failing check fails the job. Reports and traces are uploaded even on failure.
+
+Live JSON tests target the applications configured in `json/`. Run them locally with `npm test`, or choose **run_target_tests** when manually dispatching the workflow. They are separate from Studio verification so routine app checks use disposable local data.
+
+```bash
+npm run check          # TypeScript, browser JS syntax, core/storage/server checks
+npm run test:studio    # Local API and Chromium user journeys
+npm audit             # Dependency advisories
+```
+
+Studio tests start a dedicated server on port 4187 with a fresh workspace in the OS temporary directory. They never modify the repository's users, customer tests, suites, or run history. Screenshots are saved under `test-results/`; the verification report is under `playwright-report/studio/`. Temporary workspaces are retained for failure investigation and can be removed after all test servers stop.
+
+## Configuration and operations
+
+See `.env.example`. `npm run ui` reads the process environment; it does not automatically load `.env`. You can explicitly load one with `node --env-file=.env --import tsx ui/server.ts`.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | Interface on which the Studio listens |
+| `PORT` | `4173` | Studio port |
+| `STUDIO_WORKSPACE` | Repository root | Root containing `json/`, `suites/`, `runs/`, and `ui/data/` |
+| `MAX_ACTIVE_RUNS` | `2` | Concurrent run limit; excess requests return 429 |
+| `RUN_TIMEOUT_MS` | `120000` | Single-test/suite time limit; CLI processes get 30 seconds of shutdown allowance |
+| `COOKIE_SECURE` | Off | Set to `1` for HTTPS installations |
+| `DB_DISABLED` | Off | Set to `1` to skip the optional Postgres connection |
+| `TEST_JSON_DIR` | Workspace `json/` | CLI input override; the Studio uses it for run snapshots |
+
+`GET /api/health` reports process liveness without authentication. Optional database status remains site-admin-only. The Docker database and Adminer ports bind to localhost. Back up `json/`, `suites/`, `ui/data/`, and `runs/` together while the server is stopped; database mirroring does not replace those files. If storage is corrupt, restore a valid backup rather than deleting user or permission files. The server refuses a second writer in the same workspace.
+
+For the reviewed requirements, implemented fixes, verification evidence, and remaining deployment work, see [the upgrade review](docs/UPGRADE_REVIEW.md).

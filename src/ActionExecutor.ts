@@ -5,6 +5,7 @@ import {
 } from "@playwright/test";
 
 import path from "path";
+import fs from "node:fs";
 
 // ============================================================
 // TEST STEP INTERFACE
@@ -103,7 +104,8 @@ export class ActionExecutor {
   // ==========================================================
 
   constructor(
-    private page: Page
+    private page: Page,
+    private artifactDir: string | undefined = process.env.RUN_DIR
   ) {
 
     this.pages.set(
@@ -859,10 +861,10 @@ export class ActionExecutor {
       // ======================================================
 
       case "screenshot":
-
+        if (this.artifactDir) fs.mkdirSync(this.artifactDir, { recursive: true });
         await this.page.screenshot({
           path:
-            step.screenshot ??
+            (this.artifactDir ? path.join(this.artifactDir, path.basename(step.screenshot || `capture-${Date.now()}.png`)) : step.screenshot) ??
             `screenshots/${Date.now()}.png`,
           fullPage: true
         });

@@ -1,9 +1,14 @@
 {
-  "name": "test",
+  "name": "Example domain smoke",
+  "description": "Starter example. Replace the URL and assertion with your application's expected behavior.",
   "steps": [
     {
       "action": "navigate",
-      "url": "https://"
+      "url": "https://example.com/"
+    },
+    {
+      "action": "verify-title",
+      "value": "Example Domain"
     }
   ]
 }

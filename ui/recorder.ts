@@ -349,13 +349,18 @@ export async function start(url: string, startedBy: string): Promise<RecordingSe
 export async function stop(id: string): Promise<RecordingSession | undefined> {
   const session = sessions.get(id);
   if (!session) return undefined;
+  if (session.status === "stopped") return get(id);
   session.status = "stopped";
   await session.close();
   for (const end of session.onEnd) end();
   const view = get(id);
   // Keep the steps around briefly so the UI can collect them after stopping.
-  setTimeout(() => sessions.delete(id), 5 * 60 * 1000);
+  setTimeout(() => sessions.delete(id), 5 * 60 * 1000).unref();
   return view;
+}
+
+export async function stopAll(): Promise<void> {
+  await Promise.all([...sessions.keys()].map(id => stop(id)));
 }
 
 /** Strip recorder-only fields, leaving steps the runner understands. */
