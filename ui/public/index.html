@@ -60,23 +60,34 @@
 </div>
 
 <div id="users-modal" class="modal-overlay" hidden>
-  <div class="modal">
-    <div class="modal-head">
-      <h2>Users</h2>
-      <button class="lightbox-close modal-close" id="btn-close-users" title="Close">✕</button>
+  <div class="modal user-management" aria-describedby="users-description">
+    <header class="users-header">
+      <div class="users-header-icon" aria-hidden="true"><svg class="icon"><use href="brand/icons.svg#people"/></svg></div>
+      <div class="users-header-copy"><span class="eyebrow">WORKSPACE SETTINGS</span><h2>Manage users</h2><p id="users-description">Build your team and give everyone the right access.</p></div>
+      <button class="btn-icon users-close" id="btn-close-users" aria-label="Close user management"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#close"/></svg></button>
+    </header>
+    <div class="users-content">
+      <section class="new-user-panel" aria-labelledby="new-user-title">
+        <div class="users-section-heading"><h3 id="new-user-title">Add a teammate</h3><p>Create an account for your workspace.</p></div>
+        <form id="add-user-form" class="new-user-form" autocomplete="off">
+          <fieldset id="new-user-fields">
+            <div class="user-field"><label for="new-username">Username</label><input id="new-username" placeholder="e.g. alex" autocomplete="off" required maxlength="80" aria-describedby="new-username-help"><p id="new-username-help">They’ll use this name to sign in.</p></div>
+            <div class="user-field"><label for="new-password">Password</label><div class="new-user-password"><input id="new-password" type="password" placeholder="Create a password" autocomplete="new-password" required minlength="8" maxlength="256" aria-describedby="new-password-help"><button id="btn-toggle-new-password" type="button" aria-label="Show password" aria-pressed="false">Show</button></div><p id="new-password-help">At least 8 characters. They can change it later.</p></div>
+            <div class="user-field"><label for="new-role">Role</label><select id="new-role" aria-describedby="new-role-help"><option value="member">Member</option><option value="admin">Admin</option><option value="site_admin">Site admin</option></select><p id="new-role-help"></p></div>
+            <div id="users-error" class="auth-error" role="alert" hidden></div>
+            <button id="btn-add-user" class="btn btn-primary" type="submit"><span aria-hidden="true">+</span> Add user</button>
+          </fieldset>
+        </form>
+      </section>
+      <section class="members-panel" aria-labelledby="members-title">
+        <div class="members-heading"><div class="users-section-heading"><h3 id="members-title">Workspace members <span id="users-count" class="members-count">0</span></h3><p>People who can access this workspace.</p></div><button id="btn-refresh-users" class="btn-icon" aria-label="Refresh members" title="Refresh members"><svg class="icon icon-small" aria-hidden="true"><use href="brand/icons.svg#refresh"/></svg></button></div>
+        <div class="members-search"><svg class="icon icon-small" aria-hidden="true"><use href="brand/icons.svg#search"/></svg><input id="users-search" type="search" placeholder="Search by name or role…" aria-label="Search members" autocomplete="off"></div>
+        <p id="users-list-message" class="members-message" role="status" hidden></p>
+        <ul id="users-list" class="users-list" aria-label="Workspace members"></ul>
+        <p id="users-access-hint" class="members-footnote">Use Manage access to adjust roles and permissions.</p>
+      </section>
     </div>
-    <form id="add-user-form" class="add-user-form">
-      <input id="new-username" placeholder="Username" autocomplete="off" required>
-      <input id="new-password" type="password" placeholder="Password (min 8 chars)" autocomplete="new-password" required minlength="8">
-      <select id="new-role">
-        <option value="member">Member</option>
-        <option value="admin">Admin</option>
-        <option value="site_admin">Site admin</option>
-      </select>
-      <button class="btn btn-primary" type="submit">Add</button>
-    </form>
-    <div id="users-error" class="auth-error" hidden></div>
-    <ul id="users-list" class="users-list"></ul>
+    <footer class="users-footer"><span>Accounts are for this workspace.</span><button id="btn-done-users" class="btn" type="button">Done</button></footer>
   </div>
 </div>
 

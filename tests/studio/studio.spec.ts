@@ -201,6 +201,74 @@ test("libraries support folders, filters, draft navigation and mobile access", a
   expect(errors).toEqual([]);
 });
 
+test("user management supports account creation, search, role guidance and responsive access", async ({ page, browser }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.context().addCookies((await admin.storageState()).cookies);
+  await page.goto("/");
+  await page.locator("#account-menu > summary").click();
+  await page.getByRole("button", { name: "Manage users", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Manage users", exact: true });
+  const form = dialog.locator("#add-user-form");
+  await expect(dialog.getByRole("button", { name: "Remove owner", exact: true })).toBeDisabled();
+  await form.getByLabel("Username", { exact: true }).fill("owner");
+  await form.getByLabel("Password", { exact: true }).fill(password);
+  await form.getByRole("button", { name: "Show password", exact: true }).click();
+  await expect(form.getByLabel("Password", { exact: true })).toHaveAttribute("type", "text");
+  await form.getByRole("button", { name: "Hide password", exact: true }).click();
+  await form.getByLabel("Role", { exact: true }).selectOption("admin");
+  await expect(dialog.locator("#new-role-help")).toContainText("member accounts");
+  await form.getByLabel("Role", { exact: true }).selectOption("member");
+  await form.getByRole("button", { name: /Add user/ }).click();
+  await expect(dialog.getByRole("alert")).toContainText("already exists");
+  await expect(form.getByLabel("Username", { exact: true })).toHaveValue("owner");
+  await form.getByLabel("Username", { exact: true }).fill("design-reviewer");
+  await form.getByRole("button", { name: /Add user/ }).click();
+  await expect(dialog.getByRole("button", { name: "Manage access for design-reviewer", exact: true })).toBeVisible();
+  await expect(form.getByLabel("Password", { exact: true })).toHaveValue("");
+  await dialog.getByRole("searchbox", { name: "Search members" }).fill("no-matching-person");
+  await expect(dialog.getByRole("status")).toContainText("No matching members");
+  await dialog.getByRole("searchbox", { name: "Search members" }).fill("design-reviewer");
+  await expect(dialog.locator(".member-row")).toHaveCount(1);
+  await dialog.getByRole("button", { name: "Manage access for design-reviewer", exact: true }).click();
+  await expect(page.locator("#features-modal")).toBeVisible();
+  await page.locator("#btn-features-cancel").click();
+  await expect(dialog.getByRole("button", { name: "Manage access for design-reviewer", exact: true })).toBeFocused();
+  await dialog.getByRole("button", { name: "Remove design-reviewer", exact: true }).click();
+  await page.locator("#confirm-cancel").click();
+  await expect(dialog.getByRole("button", { name: "Remove design-reviewer", exact: true })).toBeVisible();
+  await dialog.getByRole("searchbox", { name: "Search members" }).fill("");
+  await dialog.getByRole("heading", { name: "Add a teammate", exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "test-results/studio-users-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await dialog.getByRole("heading", { name: "Add a teammate", exact: true }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "test-results/studio-users-mobile.png", fullPage: true });
+  expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth)).toBeTruthy();
+  await dialog.getByRole("searchbox", { name: "Search members" }).fill("design-reviewer");
+  await expect(dialog.getByRole("button", { name: "Manage access for design-reviewer", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("#account-menu > summary")).toBeFocused();
+  expect(errors).toEqual([]);
+
+  // Non-site admins can only create members, matching the server's role rules.
+  expect((await admin.post("/api/users", { data: { username: "team-manager", password, role: "admin" } })).status()).toBe(201);
+  const context = await browser.newContext();
+  try {
+    await context.request.post("http://127.0.0.1:4187/api/auth/login", { data: { username: "team-manager", password } });
+    const managerPage = await context.newPage();
+    await managerPage.goto("http://127.0.0.1:4187/");
+    await managerPage.locator("#account-menu > summary").click();
+    await managerPage.getByRole("button", { name: "Manage users", exact: true }).click();
+    await expect(managerPage.locator("#new-role option[value=admin]")).toBeDisabled();
+    await expect(managerPage.locator("#new-role option[value=site_admin]")).toBeDisabled();
+    await expect(managerPage.locator(".member-access")).toHaveCount(0);
+    await expect(managerPage.getByRole("button", { name: "Remove owner", exact: true })).toBeDisabled();
+    await managerPage.keyboard.press("Escape");
+    await expect(managerPage.locator("#users-modal")).toBeHidden();
+  } finally { await context.close(); }
+});
+
 test("password form revokes other sessions and keeps the current session", async ({ playwright, page }) => {
   const other = await playwright.request.newContext({ baseURL: "http://127.0.0.1:4187" });
   try {

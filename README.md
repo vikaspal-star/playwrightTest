@@ -78,7 +78,9 @@ Three roles, in a ladder:
 | Admin | Day-to-day administration: users, tests, suites, reports. |
 | Member | Only what the site admin grants. Defaults include creating/editing/running tests, managing folders, running suites, and viewing reports. |
 
-Feature access is granular. The site admin opens the gear next to a user in **Manage users** and ticks the features that account may use: creating, editing, deleting or running tests, managing folders and suites, viewing reports, using AI analysis, and managing users. Every one of those is enforced server-side.
+The **Manage users** dialog separates account creation from the member list, with labeled fields, role guidance, password visibility, and search by name or role.
+
+Feature access is granular. The site admin selects **Manage access** beside a person in **Manage users** and ticks the features that account may use: creating, editing, deleting or running tests, managing folders and suites, viewing reports, using AI analysis, and managing users. Every one of those is enforced server-side.
 
 This is good local-tool hygiene, not a hardened multi-tenant auth system — don't expose this server beyond your own machine/network without more thought.
 

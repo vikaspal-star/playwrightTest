@@ -2211,14 +2211,29 @@
 
     $("btn-manage-users").addEventListener("click", openUsersModal);
     $("btn-close-users").addEventListener("click", closeUsersModal);
+    $("btn-done-users").addEventListener("click", closeUsersModal);
+    $("btn-refresh-users").addEventListener("click", renderUsersList);
+    $("users-search").addEventListener("input", drawManagedUsers);
+    $("new-role").addEventListener("change", renderNewUserRole);
+    $("btn-toggle-new-password").addEventListener("click", () => {
+      setNewPasswordVisible($("new-password").type === "password");
+    });
     $("users-modal").addEventListener("click", e => {
       if (e.target.id === "users-modal") closeUsersModal();
+    });
+    $("users-modal").addEventListener("keydown", e => {
+      if (e.key === "Escape") { e.preventDefault(); closeUsersModal(); }
     });
 
     $("add-user-form").addEventListener("submit", async e => {
       e.preventDefault();
+      const button = $("btn-add-user");
+      if (button.disabled) return;
       const err = $("users-error");
       err.hidden = true;
+      $("new-user-fields").disabled = true;
+      button.disabled = true;
+      button.textContent = "Adding user…";
       try {
         await api("/api/users", {
           method: "POST",
@@ -2229,11 +2244,18 @@
           })
         });
         $("add-user-form").reset();
+        setNewPasswordVisible(false);
+        renderNewUserRole();
+        $("users-search").value = "";
         await renderUsersList();
         toast("User added", "ok");
       } catch (ex) {
         err.textContent = ex.message;
         err.hidden = false;
+      } finally {
+        $("new-user-fields").disabled = false;
+        button.disabled = false;
+        button.textContent = "+ Add user";
       }
     });
   }
@@ -2241,34 +2263,77 @@
   async function openUsersModal() {
     $("users-modal").hidden = false;
     $("users-error").hidden = true;
+    $("users-search").value = "";
+    const siteAdmin = state.user.role === "site_admin";
+    for (const option of $("new-role").options) option.disabled = !siteAdmin && option.value !== "member";
+    if (!siteAdmin) $("new-role").value = "member";
+    renderNewUserRole();
+    $("users-access-hint").textContent = siteAdmin ? "Use Manage access to adjust roles and permissions." : "Only a site admin can change roles and permissions.";
     await renderUsersList();
   }
 
   function closeUsersModal() {
     $("users-modal").hidden = true;
+    setNewPasswordVisible(false);
   }
 
+  function setNewPasswordVisible(visible) {
+    $("new-password").type = visible ? "text" : "password";
+    $("btn-toggle-new-password").textContent = visible ? "Hide" : "Show";
+    $("btn-toggle-new-password").setAttribute("aria-label", visible ? "Hide password" : "Show password");
+    $("btn-toggle-new-password").setAttribute("aria-pressed", String(visible));
+  }
+
+  function renderNewUserRole() {
+    $("new-role-help").textContent = {
+      member: "Build tests, run suites, and view reports.",
+      admin: "Manage tests, suites, and member accounts.",
+      site_admin: "Full workspace access, including roles and permissions."
+    }[$("new-role").value];
+  }
+
+  let managedUsers = [];
+
   async function renderUsersList() {
-    let users = [];
+    const message = $("users-list-message");
+    message.textContent = "Loading members…";
+    message.hidden = false;
+    $("btn-refresh-users").disabled = true;
+    $("users-list").setAttribute("aria-busy", "true");
     try {
-      users = await api("/api/users");
+      managedUsers = await api("/api/users");
+      drawManagedUsers();
     } catch (e) {
-      toast(e.message, "error");
-      return;
+      message.textContent = `${e.message} Use Refresh members to try again.`;
+      message.hidden = false;
+    } finally {
+      $("btn-refresh-users").disabled = false;
+      $("users-list").setAttribute("aria-busy", "false");
     }
+  }
+
+  function drawManagedUsers() {
+    const query = $("users-search").value.trim().toLowerCase();
+    const users = managedUsers.filter(user => `${user.username} ${ROLE_LABELS[user.role] || user.role}`.toLowerCase().includes(query));
+    $("users-count").textContent = managedUsers.length;
+    $("users-list-message").hidden = users.length > 0;
+    $("users-list-message").textContent = query ? "No matching members. Try another name or role." : "No members to show.";
     const list = $("users-list");
     list.replaceChildren();
     for (const u of users) {
       const isSelf = u.id === state.user.id;
       list.append(
-        el("li", {},
-          el("span", { class: "u-name", text: u.username + (isSelf ? " (you)" : "") }),
-          el("span", { class: `u-role${u.role !== "member" ? " admin" : ""}`, text: ROLE_LABELS[u.role] || u.role }),
+        el("li", { class: "member-row" },
+          el("span", { class: `member-avatar avatar-${u.role}`, "aria-hidden": "true", text: u.username.slice(0, 2).toUpperCase() }),
+          el("div", { class: "member-details" },
+            el("div", { class: "member-name-line" }, el("span", { class: "u-name", text: u.username }), isSelf ? el("span", { class: "member-self", text: "You" }) : null),
+            el("span", { class: `u-role role-${u.role}`, text: ROLE_LABELS[u.role] || u.role })),
           state.user.role === "site_admin"
-            ? el("button", { class: "btn-icon", title: "Role and feature access", onclick: () => openFeaturesModal(u) }, "⚙")
+            ? el("button", { class: "btn member-access", "aria-label": `Manage access for ${u.username}`, onclick: () => openFeaturesModal(u) }, "Manage access")
             : null,
           el("button", {
-            class: "btn-icon",
+            class: "btn-icon member-remove",
+            "aria-label": `Remove ${u.username}`,
             title: isSelf ? "You cannot delete your own account" : "Delete user",
             disabled: isSelf || (u.role !== "member" && state.user.role !== "site_admin"),
             onclick: async () => {
@@ -2282,10 +2347,20 @@
                 toast(ex.message, "error");
               }
             }
-          }, "✕")
+          }, userIcon("trash"))
         )
       );
     }
+  }
+
+  function userIcon(name) {
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("class", "icon icon-small");
+    icon.setAttribute("aria-hidden", "true");
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", `brand/icons.svg#${name}`);
+    icon.append(use);
+    return icon;
   }
 
   // ---------------------------------------------------------
@@ -2518,8 +2593,9 @@
     document.addEventListener("click", event => {
       for (const dropdown of document.querySelectorAll(".dropdown[open]")) {
         if (event.target.closest(".dropdown-panel button") && dropdown.contains(event.target)) {
+          const focusedInMenu = dropdown.contains(document.activeElement);
           dropdown.open = false;
-          dropdown.querySelector("summary").focus();
+          if (focusedInMenu) dropdown.querySelector("summary").focus();
         } else if (!dropdown.contains(event.target)) dropdown.open = false;
       }
     });
