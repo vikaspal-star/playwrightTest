@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="studio.css">
 </head>
 <body>
 
@@ -197,106 +198,58 @@
 <div id="app-shell" hidden>
 <div class="app">
 
-  <aside class="sidebar">
-    <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
-        <defs>
-          <linearGradient id="mmqaArc" x1="10" y1="20" x2="54" y2="20" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#0F8EFB"/>
-            <stop offset="0.52" stop-color="#7A4FC8"/>
-            <stop offset="1" stop-color="#EF6B2A"/>
-          </linearGradient>
-        </defs>
-        <rect width="64" height="64" rx="15" fill="#081120"/>
-        <path d="M10.5 26.5 C 19 12.5, 45 12.5, 53.5 26.5" fill="none" stroke="url(#mmqaArc)" stroke-width="5" stroke-linecap="round"/>
-        <path d="M10.5 20.6 l1.15 2.35 2.35 1.15 -2.35 1.15 -1.15 2.35 -1.15 -2.35 -2.35 -1.15 2.35 -1.15 z" fill="#0F8EFB"/>
-        <path d="M53.5 20.6 l1.15 2.35 2.35 1.15 -2.35 1.15 -1.15 2.35 -1.15 -2.35 -2.35 -1.15 2.35 -1.15 z" fill="#EF6B2A"/>
-        <path d="M19.5 39 L28 47.5 L45.5 29.5" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <div>
-        <div class="brand-name">MMQA</div>
-        <div class="brand-sub">QA Automation Studio</div>
-      </div>
-    </div>
-
-    <div class="sidebar-tabs">
-      <button class="tab active" data-tab="tests">Tests</button>
-      <button class="tab" data-tab="suites">Suites</button>
-      <button class="tab" data-tab="reports">Reports</button>
-    </div>
-
-    <button id="btn-mobile-browse" class="mobile-browse btn" aria-expanded="false" aria-controls="tests-panel suites-panel">Browse tests and suites</button>
-    <div id="tests-panel" class="sidebar-panel">
-      <div class="sidebar-actions">
-        <button id="btn-new" class="btn btn-primary btn-block">+ New test</button>
-        <button id="btn-new-folder" class="btn btn-block btn-secondary-action">+ New folder</button>
-        <button id="btn-import" class="btn btn-block btn-secondary-action">Import JSON</button>
-        <input id="import-file" type="file" accept="application/json,.json" hidden>
-      </div>
-
-      <div class="sidebar-search">
-        <input id="test-search" type="search" placeholder="Search tests" autocomplete="off">
-      </div>
-
-      <div id="status-filter" class="status-filter">
-        <button class="chip active" data-filter="all">All</button>
-        <button class="chip" data-filter="passed">Passed</button>
-        <button class="chip" data-filter="failed">Failed</button>
-        <button class="chip" data-filter="running">Running</button>
-      </div>
-
-      <ul id="test-tree" class="test-list"></ul>
-    </div>
-
-    <div id="suites-panel" class="sidebar-panel" hidden>
-      <div class="sidebar-actions">
-        <button id="btn-new-suite" class="btn btn-primary btn-block">+ New suite</button>
-      </div>
-      <ul id="suite-list" class="test-list"></ul>
-    </div>
-
-    <div id="reports-panel" class="sidebar-panel" hidden>
-      <div class="sidebar-actions">
-        <label class="report-range">
-          Range
-          <select id="report-days">
-            <option value="7">Last 7 days</option>
-            <option value="30" selected>Last 30 days</option>
-            <option value="90">Last 90 days</option>
-          </select>
-        </label>
-        <button id="btn-refresh-report" class="btn btn-block btn-secondary-action">Refresh</button>
-      </div>
-      <p class="muted report-side-note">Aggregated from the runs you can access.</p>
-    </div>
-
-    <div class="sidebar-footer">
-      <button id="btn-overview" class="btn-link">Workspace overview</button>
-    </div>
-
-    <div class="sidebar-account">
-      <div class="account-info">
-        <span id="account-name" class="account-name"></span>
-        <span id="account-role" class="account-role"></span>
-      </div>
-      <div class="account-actions">
-        <button id="btn-notifications" class="bell" title="Notifications">🔔<span id="bell-count" class="bell-count" hidden>0</span></button>
-        <button id="btn-manage-users" class="btn-link" hidden>Manage users</button>
-        <button id="btn-password" class="btn-link">Password</button>
-        <button id="btn-logout" class="btn-link">Log out</button>
-      </div>
-    </div>
+  <aside class="sidebar" aria-label="Primary navigation">
+    <a class="brand" href="#view:overview" aria-label="MMQA overview">
+      <img class="brand-mark" src="brand/mark.svg" alt="" width="36" height="36">
+      <div><div class="brand-name">MMQA<span class="brand-edition">STUDIO</span></div><div class="brand-sub">QA AUTOMATION</div></div>
+    </a>
+    <div class="nav-caption">WORKSPACE</div>
+    <nav class="sidebar-tabs" aria-label="Workspace">
+      <button id="btn-overview" class="tab active" data-tab="overview" aria-label="Workspace overview"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#overview"/></svg><span>Overview</span></button>
+      <button class="tab" data-tab="tests"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#tests"/></svg><span>Test library</span><span id="nav-test-count" class="nav-count">0</span></button>
+      <button class="tab" data-tab="suites"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#suites"/></svg><span>Suites</span><span id="nav-suite-count" class="nav-count">0</span></button>
+      <button class="tab" data-tab="reports"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#reports"/></svg><span>Reports</span></button>
+    </nav>
+    <div class="sidebar-note"><span class="environment-dot"></span><div><strong>Local workspace</strong><span>Powered by Playwright</span></div></div>
   </aside>
+  <button id="nav-backdrop" class="nav-backdrop" aria-label="Close navigation" hidden></button>
 
   <main class="main" id="main-content" tabindex="-1">
-    <div id="empty" class="empty">
-      <div class="overview-heading"><span class="eyebrow">YOUR QA WORKSPACE</span><h1>Build confidence in every release.</h1><p>Create repeatable tests, run them together, and follow the evidence.</p></div>
+    <header class="app-header">
+      <div class="breadcrumbs"><button id="btn-mobile-browse" class="btn-icon mobile-browse" aria-label="Open navigation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#menu"/></svg></button><span class="breadcrumb-root">Workspace</span><span class="breadcrumb-divider">/</span><span id="page-label">Overview</span></div>
+      <div class="header-actions">
+        <button id="btn-notifications" class="bell" title="Notifications" aria-label="Notifications"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#bell"/></svg><span id="bell-count" class="bell-count" hidden>0</span></button>
+        <details id="account-menu" class="dropdown account-menu">
+          <summary aria-label="Account menu"><span id="account-avatar" class="account-avatar">M</span><span class="account-info"><span id="account-name" class="account-name"></span><span id="account-role" class="account-role"></span></span><svg class="icon icon-small" aria-hidden="true"><use href="brand/icons.svg#chevron"/></svg></summary>
+          <div class="dropdown-panel"><span class="menu-caption">YOUR ACCOUNT</span><button id="btn-manage-users" hidden>Manage users</button><button id="btn-password">Password</button><div class="menu-divider"></div><button id="btn-logout">Log out</button></div>
+        </details>
+      </div>
+    </header>
+
+    <div id="empty" class="empty page-content">
+      <div class="page-heading overview-heading"><div><span class="eyebrow">WORKSPACE HEALTH</span><h1>Workspace overview</h1><p>Your tests, results, and next steps. All in one place.</p></div><button id="btn-overview-new" class="btn btn-primary">+ Create a test</button></div>
       <div id="overview-stats" class="overview-stats" aria-label="Workspace statistics"></div>
-      <div class="overview-actions"><button id="btn-overview-new" class="btn btn-primary">+ Create a test</button><button id="btn-overview-reports" class="btn">View reports</button></div>
-      <section class="overview-recent"><h2>Recent test activity</h2><div id="overview-recent"></div></section>
+      <div class="overview-grid">
+        <section class="overview-recent surface"><div class="section-heading"><div><h2>Recent test activity</h2><p>Pick up where you left off.</p></div><button id="btn-overview-library" class="btn-link">View all tests <span aria-hidden="true">↗</span></button></div><div class="activity-columns"><span>TEST CASE</span><span>LAST RUN</span><span>STATUS</span></div><div id="overview-recent"></div></section>
+        <aside class="workflow-card surface"><span class="eyebrow">A CONNECTED WORKFLOW</span><h2>From a first step<br>to a confident release.</h2><ol><li><span class="workflow-number">01</span><div><strong>Build your tests</strong><p>Record interactions or arrange steps in the editor.</p></div></li><li><span class="workflow-number">02</span><div><strong>Bring them together</strong><p>Use suites to share a browser session across tests.</p></div></li><li><span class="workflow-number">03</span><div><strong>Learn from every run</strong><p>Review screenshots, errors, and performance over time.</p></div></li></ol><button id="btn-overview-reports" class="btn">View reports <span aria-hidden="true">↗</span></button></aside>
+      </div>
+      <div class="overview-footnote"><span class="environment-dot"></span>Live workspace data <span>•</span> Outcomes reflect each test’s latest standalone run</div>
     </div>
 
+    <section id="tests-panel" class="library-workspace page-content" hidden aria-labelledby="library-title">
+      <div class="page-heading"><div><span class="eyebrow">BUILD &amp; ORGANIZE</span><h1 id="library-title">Test library <span id="library-count" class="heading-count"></span></h1><p>A home for every test, organized by folder.</p></div><div class="page-actions"><button id="btn-new" class="btn btn-primary">+ New test</button><details class="dropdown"><summary class="btn" aria-label="Library actions">More <span aria-hidden="true">⌄</span></summary><div class="dropdown-panel"><button id="btn-new-folder">New folder</button><button id="btn-import">Import JSON</button></div></details><input id="import-file" type="file" accept="application/json,.json" hidden></div></div>
+      <div class="library-tools"><div class="library-search"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#search"/></svg><input id="test-search" type="search" placeholder="Search tests or folders…" aria-label="Search tests" autocomplete="off"></div><div id="status-filter" class="status-filter"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="passed">Passed</button><button class="chip" data-filter="failed">Failed</button><button class="chip" data-filter="running">Running</button><button class="chip" data-filter="none">Not run</button></div></div>
+      <div class="library-surface surface"><div class="library-columns"><span>TEST CASE</span><span>STEPS</span><span>LAST RUN</span><span>STATUS</span></div><ul id="test-tree" class="test-list"></ul></div>
+      <p id="library-summary" class="library-summary" aria-live="polite"></p>
+    </section>
+
+    <section id="suites-panel" class="library-workspace page-content" hidden aria-labelledby="suites-title">
+      <div class="page-heading"><div><span class="eyebrow">CONNECT YOUR TESTS</span><h1 id="suites-title">Suites <span id="suite-library-count" class="heading-count"></span></h1><p>Run ordered test journeys in a shared browser session.</p></div><button id="btn-new-suite" class="btn btn-primary">+ New suite</button></div>
+      <div class="library-surface surface"><div class="library-columns"><span>SUITE</span><span>TESTS</span><span>LAST RUN</span><span>STATUS</span></div><ul id="suite-list" class="test-list"></ul></div>
+    </section>
+
     <div id="workspace" class="workspace" hidden>
+      <div class="editor-context"><button class="btn-link" data-back="tests">← Test library</button><span>TEST EDITOR</span></div>
       <header class="toolbar">
         <div class="toolbar-title">
           <input id="test-name" class="input-title" placeholder="Test name" autocomplete="off">
@@ -308,10 +261,7 @@
         </div>
         <div class="toolbar-actions">
           <span id="dirty" class="dirty" hidden>Unsaved changes</span>
-          <button id="btn-record" class="btn btn-ghost" title="Record steps in a real browser">⏺ Record</button>
-          <button id="btn-export" class="btn btn-ghost" title="Download this test as JSON">⬇ Export</button>
-          <button id="btn-share" class="btn btn-ghost">🔗 Share</button>
-          <button id="btn-delete" class="btn btn-ghost" title="Delete this test file">Delete</button>
+          <details class="dropdown editor-menu"><summary class="btn">Test actions <span aria-hidden="true">⌄</span></summary><div class="dropdown-panel"><button id="btn-record">Record steps</button><button id="btn-export">Export JSON</button><button id="btn-share">Share test</button><div class="menu-divider"></div><button id="btn-delete" class="danger-text">Delete test</button></div></details>
           <button id="btn-save" class="btn">Save</button>
           <button id="btn-run" class="btn btn-primary">▶ Run</button>
           <button id="btn-stop" class="btn btn-danger" hidden>■ Stop</button>
@@ -385,9 +335,10 @@
     <div id="reports-workspace" class="workspace" hidden>
       <header class="toolbar">
         <div class="toolbar-title">
-          <div class="input-title report-title">Reports</div>
+          <h1 class="input-title report-title">Reports</h1>
           <div class="file-row"><span id="report-range-label" class="file-name"></span></div>
         </div>
+        <div id="reports-panel" class="report-controls"><label for="report-days">Period</label><select id="report-days"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option></select><button id="btn-refresh-report" class="btn">Refresh</button></div>
       </header>
       <div class="report-body">
         <div id="report-cards" class="report-cards"></div>
@@ -419,6 +370,7 @@
     </div>
 
     <div id="suite-workspace" class="workspace" hidden>
+      <div class="editor-context"><button class="btn-link" data-back="suites">← Suites</button><span>SUITE BUILDER</span></div>
       <header class="toolbar">
         <div class="toolbar-title">
           <input id="suite-name" class="input-title" placeholder="Suite name" autocomplete="off">

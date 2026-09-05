@@ -44,7 +44,9 @@ A local UI for building and running the JSON tests:
 npm run ui               # http://localhost:4173
 ```
 
-- See test counts, last-run outcomes, and recent activity in the workspace overview. Browse tests in `json/`, search/filter by status, create new ones, and edit steps in a form driven by the action catalog.
+- Use the persistent navigation to move between Overview, Test library, Suites, and Reports. The overview shows current counts and recent test activity; click a count to open the corresponding library filter.
+- Browse tests in a full-width library with nested folders, wrapping test names, step counts, and last-run status. Search by test name, filename, or folder. Create tests directly, or use **More** to create folders and import JSON.
+- Edit steps in a form driven by the action catalog. Returning to the library keeps the current test or suite draft available; reopening it restores your unsaved work. The navigation becomes a drawer on smaller screens.
 - Run a test and watch each step go green (or red) live, with a screenshot captured after every step (click it to zoom), the error text when a step fails, and console log tail.
 - Run history is kept under `runs/<runId>/` (git-ignored). Each single-test run has its own HTML report at `/runs/<runId>/report/`, linked from its run panel. `/report/` is reserved for admin access to legacy CLI reports.
 
@@ -54,11 +56,11 @@ The UI supplies a private input snapshot and separate output directories to the 
 
 ### Folders
 
-Tests can be organised into nested folders of any depth. Folders are **virtual**: the JSON files stay flat in `json/`, and the folder path is stored as metadata, so `npm test` and CI discover tests exactly as before. Create folders from the sidebar, and move a test with the folder button under its name.
+Tests can be organised into nested folders of any depth. Folders are **virtual**: the JSON files stay flat in `json/`, and the folder path is stored as metadata, so `npm test` and CI discover tests exactly as before. Create folders from **Test library → More → New folder**, or use the subfolder control on a folder row. Move a test with the folder button under its name.
 
 ### Sharing
 
-Every test is visible to the whole team by default (unchanged from before). The **Share** button gives you a direct link to the test and lets the creator (or an admin) restrict it to specific people, each granted either "can view & run" or "can edit". Restricted tests disappear from other people's lists entirely, and the server enforces this on every route, not just in the UI.
+Every test is visible to the whole team by default (unchanged from before). **Test actions → Share test** gives you a direct link to the test and lets the creator (or an admin) restrict it to specific people, each granted either "can view & run" or "can edit". Restricted tests disappear from other people's lists entirely, and the server enforces this on every route, not just in the UI.
 
 ### Suites
 
@@ -80,13 +82,13 @@ Feature access is granular. The site admin opens the gear next to a user in **Ma
 
 This is good local-tool hygiene, not a hardened multi-tenant auth system — don't expose this server beyond your own machine/network without more thought.
 
-The server binds to `127.0.0.1` by default. Passwords can be changed from **Password** in the account area; a change revokes other sessions and renews the current one. Authentication attempts are rate limited, browser mutations require the same origin, and responses include security headers. Restricted-test access also governs related suites, historical runs, event streams, screenshots, reports, and AI routes. Recordings belong to their creator; applying them requires test-edit access. Only a run's starter or an admin with the run feature can stop it.
+The server binds to `127.0.0.1` by default. Passwords can be changed from **Password** in the header account menu; a change revokes other sessions and renews the current one. Authentication attempts are rate limited, browser mutations require the same origin, and responses include security headers. Restricted-test access also governs related suites, historical runs, event streams, screenshots, reports, and AI routes. Recordings belong to their creator; applying them requires test-edit access. Only a run's starter or an admin with the run feature can stop it.
 
 File storage supports one server process per workspace. Writes replace complete JSON files atomically. Invalid account or sharing storage fails closed rather than silently resetting access. On restart, interrupted runs are marked failed with an explanation. Retained sharing metadata protects history after a test is deleted or its filename is reused.
 
 ### Reports
 
-The **Reports** tab aggregates every stored run over a chosen window: pass rate, steps executed, average duration, a per-day pass/fail trend, and the most recent failures with the step and error that caused them. Clicking a row opens that test or suite.
+The **Reports** page keeps its period selector and refresh control beside the report, and aggregates every stored run over a chosen window: pass rate, steps executed, average duration, a per-day pass/fail trend, and the most recent failures with the step and error that caused them. Clicking a row opens that test or suite.
 
 Three breakdowns are included:
 
@@ -98,7 +100,7 @@ A run still in flight counts toward "Runs" but not toward pass or fail, and its 
 
 ### Notifications
 
-The bell in the sidebar shows unread notifications: when a run you started finishes (with the failing step named if it failed), when someone shares a test with you, and when your access changes. Clicking one jumps to the relevant test or suite.
+The bell in the header shows unread notifications: when a run you started finishes (with the failing step named if it failed), when someone shares a test with you, and when your access changes. Clicking one jumps to the relevant test or suite.
 
 ### AI failure analysis
 
@@ -113,9 +115,9 @@ Without the key set, the button is replaced by a note explaining how to enable i
 
 ## Recording, importing, and exporting
 
-- **Record** (test toolbar): enter a URL and a real browser opens. Clicks, typing, dropdowns, checkboxes, and Enter/Escape/Tab become steps, streamed into the panel live. Password fields are recorded as a step but their value is never captured. Selectors prefer `id`, then test ids, `name`, `aria-label`, placeholder, a unique class, then visible text; a positional fallback is flagged **fragile**. Set `RECORDER_HEADLESS=1` on a machine with no display.
-- **Import JSON** (sidebar): accepts a Test Studio export or a **Reflect** export. Reflect steps are mapped to the equivalent actions and their descriptions are kept as notes; anything with no faithful equivalent is reported rather than silently dropped.
-- **Export** (test toolbar): downloads the open test as JSON.
+- **Record steps** (test editor → Test actions): enter a URL and a real browser opens. Clicks, typing, dropdowns, checkboxes, and Enter/Escape/Tab become steps, streamed into the panel live. Password fields are recorded as a step but their value is never captured. Selectors prefer `id`, then test ids, `name`, `aria-label`, placeholder, a unique class, then visible text; a positional fallback is flagged **fragile**. Set `RECORDER_HEADLESS=1` on a machine with no display.
+- **Import JSON** (Test library → More): accepts a Test Studio export or a **Reflect** export. Reflect steps are mapped to the equivalent actions and their descriptions are kept as notes; anything with no faithful equivalent is reported rather than silently dropped.
+- **Export JSON** (test editor → Test actions): downloads the open test as JSON.
 
 Reflect visual comparisons are reported as unsupported because no baseline comparison exists. Scrolls without coordinates and waits without a recorded duration are also reported, rather than assigning fabricated values.
 

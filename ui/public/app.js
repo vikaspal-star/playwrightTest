@@ -5,6 +5,8 @@
   const $ = id => document.getElementById(id);
 
   const state = {
+    view: "empty",
+    section: "overview",
     actions: [],
     actionMap: new Map(),
     fields: {},
@@ -230,26 +232,46 @@
   }
 
   // ---------------------------------------------------------
-  // Sidebar tabs (Tests / Suites)
+  // Workspace navigation
   // ---------------------------------------------------------
 
   function switchTab(tab) {
+    if (tab === "reports") { openReports(); return; }
+    activateView(tab, tab === "overview" ? "empty" : `${tab}-panel`);
+    location.hash = `view:${tab}`;
+    if (tab === "overview") renderOverview();
+  }
+
+  function activateView(section, view) {
+    state.section = section;
+    state.view = view;
     for (const btn of document.querySelectorAll(".sidebar-tabs .tab")) {
-      btn.classList.toggle("active", btn.dataset.tab === tab);
+      const active = btn.dataset.tab === section;
+      btn.classList.toggle("active", active);
+      if (active) btn.setAttribute("aria-current", "page"); else btn.removeAttribute("aria-current");
     }
-    $("tests-panel").hidden = tab !== "tests";
-    $("suites-panel").hidden = tab !== "suites";
-    $("reports-panel").hidden = tab !== "reports";
-    if (tab === "reports") openReports();
+    for (const id of ["empty", "tests-panel", "suites-panel", "workspace", "suite-workspace", "reports-workspace"]) $(id).hidden = id !== view;
+    $("page-label").textContent = { overview: "Overview", tests: "Test library", suites: "Suites", reports: "Reports" }[section];
+    mobileNavigation(false);
   }
 
   function mobileNavigation(open) {
-    document.querySelector(".sidebar").classList.toggle("nav-open", open);
+    const sidebar = document.querySelector(".sidebar");
+    const mobile = window.matchMedia("(max-width: 760px)").matches;
+    const wasOpen = sidebar.classList.contains("nav-open");
+    open = mobile && open;
+    sidebar.classList.toggle("nav-open", open);
+    sidebar.inert = mobile && !open;
+    $("main-content").inert = open;
     $("btn-mobile-browse").setAttribute("aria-expanded", String(open));
+    $("nav-backdrop").hidden = !open;
+    $("btn-mobile-browse").setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+    if (open) (sidebar.querySelector("[aria-current='page']") || sidebar.querySelector("button")).focus();
+    else if (wasOpen) $("btn-mobile-browse").focus();
   }
 
   // ---------------------------------------------------------
-  // Sidebar: tests, organized into a virtual folder tree
+  // Test library, organized into a virtual folder tree
   // ---------------------------------------------------------
 
   async function loadTests() {
@@ -260,12 +282,23 @@
 
   function renderOverview() {
     const tests = state.tests;
-    const stats = [["Tests", tests.length], ["Passed last run", tests.filter(t => testStatus(t) === "passed").length], ["Need attention", tests.filter(t => t.error || testStatus(t) === "failed").length], ["Never run", tests.filter(t => !t.lastRun && !t.running).length]];
-    $("overview-stats").replaceChildren(...stats.map(([label, value]) => el("div", { class: "overview-stat" }, el("strong", { text: value }), el("span", { text: label }))));
+    const stats = [["Test cases", tests.length, "Across your workspace", "all"], ["Passed latest run", tests.filter(t => testStatus(t) === "passed").length, "Latest standalone results", "passed"], ["Need attention", tests.filter(t => t.error || testStatus(t) === "failed").length, "Failed or invalid tests", "attention"], ["Never run", tests.filter(t => !t.lastRun && !t.running).length, "Ready for a first run", "none"]];
+    $("overview-stats").replaceChildren(...stats.map(([label, value, caption, filter]) => el("button", { class: `overview-stat stat-${filter}`, onclick: () => {
+      state.statusFilter = filter;
+      state.search = "";
+      $("test-search").value = "";
+      revealMatches();
+      renderTestList();
+      switchTab("tests");
+    } }, el("span", { class: "stat-topline", text: label }), el("strong", { text: value }), el("span", { class: "stat-caption", text: caption }))));
     $("btn-overview-new").hidden = !can("tests.create");
     $("btn-overview-reports").hidden = !can("reports.view");
     const recent = [...tests].sort((a, b) => (b.lastRun?.startedAt || "").localeCompare(a.lastRun?.startedAt || "")).slice(0, 6);
-    $("overview-recent").replaceChildren(...(recent.length ? recent.map(t => el("button", { class: "overview-test", onclick: () => openTest(t.file) }, el("span", { text: t.name || t.file }), el("span", { class: `badge ${testStatus(t)}`, text: t.error ? "Invalid test" : t.lastRun ? testStatus(t) : "Not run" }))) : [el("p", { class: "muted", text: "Your first test starts here. Create one or import an existing JSON test from the sidebar." })]));
+    $("overview-recent").replaceChildren(...(recent.length ? recent.map(t => el("button", { class: "overview-test", onclick: () => openTest(t.file) },
+      el("span", { class: "activity-name" }, el("strong", { text: t.name || t.file }), el("small", { text: t.meta?.folder || "Unfiled" })),
+      el("span", { class: "activity-time", text: t.lastRun ? fmtRelative(t.lastRun.startedAt) : "—" }),
+      el("span", { class: `badge ${t.error ? "failed" : testStatus(t)}`, text: t.error ? "Invalid" : testStatus(t) === "none" ? "Not run" : testStatus(t) })
+    )) : [el("p", { class: "library-empty", text: "Start with your first test. Create one or import an existing test from the test library." })]));
   }
 
   async function loadFolders() {
@@ -280,9 +313,10 @@
   function visibleTests() {
     const q = state.search.trim().toLowerCase();
     return state.tests.filter(t => {
-      if (state.statusFilter !== "all" && testStatus(t) !== state.statusFilter) return false;
+      if (state.statusFilter === "attention") { if (!t.error && testStatus(t) !== "failed") return false; }
+      else if (state.statusFilter !== "all" && testStatus(t) !== state.statusFilter) return false;
       if (!q) return true;
-      return t.file.toLowerCase().includes(q) || (t.name || "").toLowerCase().includes(q);
+      return [t.file, t.name || "", t.meta?.folder || ""].some(value => value.toLowerCase().includes(q));
     });
   }
 
@@ -320,29 +354,23 @@
 
   function testRow(t, depth) {
     const status = testStatus(t);
-    const dotColor = {
-      running: "var(--run)", passed: "var(--pass)", failed: "var(--fail)", none: "var(--skip)"
-    }[status];
-    const sub = t.error
-      ? "Invalid JSON"
-      : `${t.stepCount} step${t.stepCount === 1 ? "" : "s"}` +
-        (t.lastRun ? ` · ${status} ${fmtRelative(t.lastRun.startedAt)}` : "") +
-        (t.meta && t.meta.createdBy ? ` · by ${t.meta.createdBy}` : "");
-    return el("li", {
+    return el("li", {}, el("button", {
       class: `test-item${t.file === state.file ? " active" : ""}`,
-      style: `padding-left:${depth * 16}px`,
       title: t.file,
+      "aria-label": `Open test ${t.name || t.file}`,
       onclick: () => openTest(t.file)
     },
-      el("span", { class: "dot", style: `background:${dotColor}` }),
-      el("div", { class: "meta" },
-        el("div", { class: "title" },
+      el("span", { class: "library-name", style: `--depth:${Math.min(depth, 4)}` }, el("span", { class: "test-file-icon", "aria-hidden": "true", text: "✓" }), el("span", { class: "meta" },
+        el("span", { class: "title" },
           t.name || t.file,
           t.meta && t.meta.visibility === "restricted" ? el("span", { class: "share-badge", title: "Restricted sharing" }, " 🔒") : null
         ),
-        el("div", { class: "sub", text: sub })
-      )
-    );
+        el("span", { class: "sub", text: t.error ? "Invalid test definition" : t.file })
+      )),
+      el("span", { class: "library-step-count", text: String(t.stepCount) }),
+      el("span", { class: "library-last-run", text: t.lastRun ? fmtRelative(t.lastRun.startedAt) : "—" }),
+      el("span", { class: `badge ${t.error ? "failed" : status}`, text: t.error ? "Invalid" : status === "none" ? "Not run" : status })
+    ));
   }
 
   function renderFolderNode(node, depth) {
@@ -351,14 +379,13 @@
     for (const folder of sortedFolders) {
       const collapsed = state.collapsedFolders.has(folder.path);
       rows.push(
-        el("li", { class: "folder-row", style: `padding-left:${depth * 16}px` },
-          el("button", { class: "folder-toggle", onclick: () => toggleFolder(folder.path) }, collapsed ? "▸" : "▾"),
-          el("span", { class: "folder-name", onclick: () => toggleFolder(folder.path) }, folder.name),
-          el("span", { class: "folder-count", text: String(countTests(folder)) }),
+        el("li", { class: "folder-row", style: `--depth:${Math.min(depth, 4)}` },
+          el("button", { class: "folder-toggle", "data-folder": folder.path, "aria-expanded": String(!collapsed), "aria-label": `${collapsed ? "Expand" : "Collapse"} folder ${folder.path}`, onclick: () => toggleFolder(folder.path) },
+            el("span", { "aria-hidden": "true", text: collapsed ? "▸" : "▾" }), el("span", { class: "folder-name", text: folder.name }), el("span", { class: "folder-count", text: String(countTests(folder)) })),
           el("div", { class: "folder-actions" },
-            el("button", { class: "btn-icon", title: "New test in this folder", onclick: () => createTest(folder.path) }, "+"),
-            el("button", { class: "btn-icon", title: "New subfolder", onclick: () => createFolder(folder.path) }, "📁"),
-            el("button", { class: "btn-icon", title: "Delete this empty folder", onclick: () => deleteFolder(folder.path) }, "✕")
+            can("tests.create") ? el("button", { class: "btn-icon", title: "New test in this folder", onclick: () => createTest(folder.path) }, "+") : null,
+            can("folders.manage") ? el("button", { class: "btn-icon", title: "New subfolder", onclick: () => createFolder(folder.path) }, "⊞") : null,
+            can("folders.manage") && countTests(folder) === 0 ? el("button", { class: "btn-icon", title: "Delete this empty folder", onclick: () => deleteFolder(folder.path) }, "✕") : null
           )
         )
       );
@@ -373,22 +400,38 @@
     if (state.collapsedFolders.has(path)) state.collapsedFolders.delete(path);
     else state.collapsedFolders.add(path);
     renderTestList();
+    [...document.querySelectorAll(".folder-toggle")].find(button => button.dataset.folder === path)?.focus();
+  }
+
+  function revealMatches() {
+    for (const test of visibleTests()) {
+      let folder = test.meta?.folder || "";
+      while (folder) {
+        state.collapsedFolders.delete(folder);
+        folder = folder.includes("/") ? folder.slice(0, folder.lastIndexOf("/")) : "";
+      }
+    }
   }
 
   function renderTestList() {
     const list = $("test-tree");
     list.replaceChildren();
+    $("nav-test-count").textContent = state.tests.length;
+    $("library-count").textContent = state.tests.length;
+    $("library-summary").replaceChildren(document.createTextNode(`${visibleTests().length} of ${state.tests.length} tests${state.statusFilter === "attention" ? " · Needs attention" : ""}`));
+    if (state.statusFilter !== "all" || state.search) $("library-summary").append(el("button", { class: "btn-link", text: "Clear filters", onclick: () => { state.statusFilter = "all"; state.search = ""; $("test-search").value = ""; renderTestList(); } }));
 
     for (const chip of document.querySelectorAll("#status-filter .chip")) {
       const count = chip.dataset.filter === "all"
         ? state.tests.length
         : state.tests.filter(t => testStatus(t) === chip.dataset.filter).length;
-      chip.textContent = `${chip.dataset.filter[0].toUpperCase()}${chip.dataset.filter.slice(1)} (${count})`;
+      chip.textContent = `${chip.dataset.filter === "none" ? "Not run" : chip.dataset.filter[0].toUpperCase() + chip.dataset.filter.slice(1)} ${count}`;
       chip.classList.toggle("active", chip.dataset.filter === state.statusFilter);
+      chip.setAttribute("aria-pressed", String(chip.dataset.filter === state.statusFilter));
     }
 
     if (!state.tests.length && !state.folders.length) {
-      list.append(el("li", { class: "muted", text: "No tests in ./json yet." }));
+      list.append(el("li", { class: "library-empty", text: "No tests yet. Create a test or import your existing JSON to get started." }));
       return;
     }
 
@@ -399,7 +442,7 @@
 
     const rows = renderFolderNode(tree, 0);
     if (!rows.length) {
-      list.append(el("li", { class: "no-match", text: "No tests match." }));
+      list.append(el("li", { class: "library-empty", text: "No matching tests. Try a different search or clear your filters." }));
       return;
     }
     for (const r of rows) list.append(r);
@@ -460,6 +503,11 @@
   // ---------------------------------------------------------
 
   async function openTest(file, { force = false } = {}) {
+    if (!force && file === state.file && state.test) {
+      activateView("tests", "workspace");
+      location.hash = encodeURIComponent(file);
+      return;
+    }
     if (!force && state.dirty && !(await confirmDialog("Discard unsaved changes?", { okLabel: "Discard", danger: true }))) return;
     try {
       state.test = await api(`/api/tests/${encodeURIComponent(file)}`);
@@ -470,13 +518,8 @@
     state.file = file;
     setDirty(false);
     location.hash = encodeURIComponent(file);
-    switchTab("tests");
+    activateView("tests", "workspace");
 
-    $("empty").hidden = true;
-    $("suite-workspace").hidden = true;
-    $("reports-workspace").hidden = true;
-    $("workspace").hidden = false;
-    mobileNavigation(false);
     $("test-name").value = state.test.name || "";
     $("test-description").value = state.test.description || "";
     $("test-file").textContent = `json/${file}`;
@@ -493,6 +536,7 @@
   }
 
   async function createTest(folder) {
+    if (state.dirty && !(await confirmDialog("Discard unsaved test changes before creating another test?", { okLabel: "Discard", danger: true }))) return;
     const raw = await promptDialog("File name for the new test (saved in ./json):", {
       title: "New test",
       okLabel: "Create",
@@ -578,9 +622,7 @@
       state.file = null;
       state.test = null;
       setDirty(false);
-      location.hash = "";
-      $("workspace").hidden = true;
-      $("empty").hidden = false;
+      switchTab("tests");
       detachRun(testPanel);
       await Promise.all([loadTests(), loadFolders()]);
     } catch (e) {
@@ -1359,36 +1401,39 @@
   function renderSuiteList() {
     const list = $("suite-list");
     list.replaceChildren();
+    $("nav-suite-count").textContent = state.suites.length;
+    $("suite-library-count").textContent = state.suites.length;
     if (!state.suites.length) {
-      list.append(el("li", { class: "muted", text: "No suites yet. A suite runs several tests in order, in one shared browser session." }));
+      list.append(el("li", { class: "library-empty", text: "Create your first suite to connect tests into one shared browser journey." }));
       return;
     }
     for (const s of state.suites) {
       const status = suiteStatus(s);
-      const dotColor = {
-        running: "var(--run)", passed: "var(--pass)", failed: "var(--fail)", none: "var(--skip)"
-      }[status];
-      const sub = s.error
-        ? "Invalid JSON"
-        : `${s.testCount} test${s.testCount === 1 ? "" : "s"}` +
-          (s.lastRun ? ` · ${status} ${fmtRelative(s.lastRun.startedAt)}` : "");
       list.append(
-        el("li", {
+        el("li", {}, el("button", {
           class: `test-item${s.file === state.suiteFile ? " active" : ""}`,
           title: s.file,
+          "aria-label": `Open suite ${s.name || s.file}`,
           onclick: () => openSuite(s.file)
         },
-          el("span", { class: "dot", style: `background:${dotColor}` }),
-          el("div", { class: "meta" },
-            el("div", { class: "title", text: s.name || s.file }),
-            el("div", { class: "sub", text: sub })
-          )
-        )
+          el("span", { class: "library-name" }, el("span", { class: "test-file-icon suite-file-icon", "aria-hidden": "true", text: "⇄" }), el("span", { class: "meta" },
+            el("span", { class: "title", text: s.name || s.file }),
+            el("span", { class: "sub", text: s.error ? "Invalid suite definition" : s.file })
+          )),
+          el("span", { class: "library-step-count", text: String(s.testCount) }),
+          el("span", { class: "library-last-run", text: s.lastRun ? fmtRelative(s.lastRun.startedAt) : "—" }),
+          el("span", { class: `badge ${s.error ? "failed" : status}`, text: s.error ? "Invalid" : status === "none" ? "Not run" : status })
+        ))
       );
     }
   }
 
   async function openSuite(file, { force = false } = {}) {
+    if (!force && file === state.suiteFile && state.suite) {
+      activateView("suites", "suite-workspace");
+      location.hash = `suite:${encodeURIComponent(file)}`;
+      return;
+    }
     if (!force && state.suiteDirty && !(await confirmDialog("Discard unsaved changes?", { okLabel: "Discard", danger: true }))) return;
     try {
       state.suite = await api(`/api/suites/${encodeURIComponent(file)}`);
@@ -1400,13 +1445,8 @@
     state.suiteDirty = false;
     $("suite-dirty").hidden = true;
     location.hash = `suite:${encodeURIComponent(file)}`;
-    switchTab("suites");
+    activateView("suites", "suite-workspace");
 
-    $("empty").hidden = true;
-    $("workspace").hidden = true;
-    $("reports-workspace").hidden = true;
-    $("suite-workspace").hidden = false;
-    mobileNavigation(false);
     $("suite-name").value = state.suite.name || "";
     $("suite-description").value = state.suite.description || "";
     $("suite-continue-on-failure").checked = Boolean(state.suite.continueOnFailure);
@@ -1477,6 +1517,7 @@
   }
 
   async function createSuite() {
+    if (state.suiteDirty && !(await confirmDialog("Discard unsaved suite changes before creating another suite?", { okLabel: "Discard", danger: true }))) return;
     const raw = await promptDialog("File name for the new suite (saved in ./suites):", {
       title: "New suite",
       okLabel: "Create",
@@ -1531,9 +1572,7 @@
       state.suiteFile = null;
       state.suite = null;
       state.suiteDirty = false;
-      location.hash = "";
-      $("suite-workspace").hidden = true;
-      $("empty").hidden = false;
+      switchTab("suites");
       detachRun(suitePanel);
       await loadSuites();
     } catch (e) {
@@ -1571,10 +1610,9 @@
   // ---------------------------------------------------------
 
   async function openReports() {
-    $("empty").hidden = true;
-    $("workspace").hidden = true;
-    $("suite-workspace").hidden = true;
-    $("reports-workspace").hidden = false;
+    if (!can("reports.view")) { switchTab("overview"); return; }
+    activateView("reports", "reports-workspace");
+    location.hash = "view:reports";
     await loadReport();
   }
 
@@ -1608,7 +1646,7 @@
 
     $("report-cards").replaceChildren(
       statCard("Runs", String(r.totals.runs), `${r.totals.running} running now`),
-      statCard("Pass rate", `${r.totals.passRate}%`, `${r.totals.passed} passed · ${r.totals.failed} failed`),
+      statCard("Pass rate", r.totals.passRate == null ? "—" : `${r.totals.passRate}%`, `${r.totals.passed} passed · ${r.totals.failed} failed`),
       statCard("Steps executed", String(r.totals.stepsExecuted), ""),
       statCard("Avg duration", fmtMs(r.totals.avgDurationMs) || "—", "per finished run")
     );
@@ -1842,6 +1880,7 @@
   // ---------------------------------------------------------
 
   async function importTestFile(file) {
+    if (state.dirty && !(await confirmDialog("Discard unsaved test changes before importing another test?", { okLabel: "Discard", danger: true }))) return;
     let parsed;
     try {
       parsed = JSON.parse(await file.text());
@@ -2126,6 +2165,7 @@
   function renderAccount() {
     if (!state.user) return;
     $("account-name").textContent = state.user.username;
+    $("account-avatar").textContent = state.user.username.slice(0, 2).toUpperCase();
     $("account-role").textContent = ROLE_LABELS[state.user.role] || state.user.role;
     $("btn-manage-users").hidden = !can("users.manage");
 
@@ -2137,6 +2177,7 @@
     $("btn-new-suite").hidden = !can("suites.manage");
     const importButton = $("btn-import");
     if (importButton) importButton.hidden = !can("tests.create");
+    document.querySelector("#tests-panel .dropdown").hidden = !can("tests.create") && !can("folders.manage");
   }
 
   function wireAccountControls() {
@@ -2469,12 +2510,19 @@
 
     $("btn-new").addEventListener("click", () => createTest());
     $("btn-mobile-browse").addEventListener("click", () => mobileNavigation($("btn-mobile-browse").getAttribute("aria-expanded") !== "true"));
+    $("nav-backdrop").addEventListener("click", () => { mobileNavigation(false); $("btn-mobile-browse").focus(); });
+    window.matchMedia("(max-width: 760px)").addEventListener("change", () => mobileNavigation(false));
     $("btn-overview-new").addEventListener("click", () => createTest());
     $("btn-overview-reports").addEventListener("click", () => switchTab("reports"));
-    $("btn-overview").addEventListener("click", () => {
-      for (const id of ["workspace", "suite-workspace", "reports-workspace"]) $(id).hidden = true;
-      $("empty").hidden = false;
-      renderOverview();
+    $("btn-overview-library").addEventListener("click", () => switchTab("tests"));
+    for (const button of document.querySelectorAll("[data-back]")) button.addEventListener("click", () => switchTab(button.dataset.back));
+    document.addEventListener("click", event => {
+      for (const dropdown of document.querySelectorAll(".dropdown[open]")) {
+        if (event.target.closest(".dropdown-panel button") && dropdown.contains(event.target)) {
+          dropdown.open = false;
+          dropdown.querySelector("summary").focus();
+        } else if (!dropdown.contains(event.target)) dropdown.open = false;
+      }
     });
     $("btn-save").addEventListener("click", saveTest);
     $("btn-run").addEventListener("click", runTest);
@@ -2488,6 +2536,7 @@
 
     $("test-search").addEventListener("input", e => {
       state.search = e.target.value;
+      revealMatches();
       renderTestList();
     });
 
@@ -2495,6 +2544,7 @@
       const chip = e.target.closest(".chip");
       if (!chip) return;
       state.statusFilter = chip.dataset.filter;
+      revealMatches();
       renderTestList();
     });
 
@@ -2513,26 +2563,33 @@
         if (!$("workspace").hidden && state.file) saveTest();
         else if (!$("suite-workspace").hidden && state.suiteFile) saveSuite();
       }
-      if (e.key === "Escape") closeLightbox();
-    });
-
-    window.addEventListener("hashchange", () => {
-      const raw = decodeURIComponent(location.hash.slice(1));
-      if (raw.startsWith("suite:")) {
-        const file = raw.slice(6);
-        if (file !== state.suiteFile && state.suites.some(s => s.file === file)) openSuite(file);
-      } else if (raw && raw !== state.file && state.tests.some(t => t.file === raw)) {
-        openTest(raw);
+      if (e.key === "Escape") {
+        closeLightbox();
+        if ($("btn-mobile-browse").getAttribute("aria-expanded") === "true") { mobileNavigation(false); $("btn-mobile-browse").focus(); }
+        for (const dropdown of document.querySelectorAll(".dropdown[open]")) { dropdown.open = false; dropdown.querySelector("summary").focus(); }
       }
     });
 
-    const fromHash = decodeURIComponent(location.hash.slice(1));
-    if (fromHash.startsWith("suite:")) {
-      const file = fromHash.slice(6);
-      if (state.suites.some(s => s.file === file)) await openSuite(file, { force: true });
-    } else if (fromHash && state.tests.some(t => t.file === fromHash)) {
-      await openTest(fromHash, { force: true });
+    async function followRoute() {
+      let raw;
+      try { raw = decodeURIComponent(location.hash.slice(1)); } catch { switchTab("overview"); return; }
+      if (!raw || raw.startsWith("view:")) {
+        const section = raw.slice(5) || "overview";
+        const valid = ["overview", "tests", "suites", "reports"].includes(section) ? section : "overview";
+        const view = valid === "overview" ? "empty" : valid === "reports" ? "reports-workspace" : `${valid}-panel`;
+        if (state.view !== view) switchTab(valid);
+        return;
+      }
+      if (raw.startsWith("suite:")) {
+        const file = raw.slice(6);
+        if ((file !== state.suiteFile || state.view !== "suite-workspace") && state.suites.some(s => s.file === file)) await openSuite(file);
+      } else if (raw && (raw !== state.file || state.view !== "workspace") && state.tests.some(t => t.file === raw)) {
+        await openTest(raw);
+      }
     }
+    window.addEventListener("hashchange", followRoute);
+    activateView("overview", "empty");
+    await followRoute();
   }
 
   function wireAccessibleDialogs() {
@@ -2552,7 +2609,9 @@
         if (!overlay.hidden) {
           if (!overlay.contains(document.activeElement)) previousFocus = document.activeElement;
           (dialog.querySelector("input:not([hidden]), button:not([disabled]), select") || dialog).focus();
-        } else if (previousFocus?.isConnected) previousFocus.focus();
+        } else if (previousFocus?.isConnected) {
+          (previousFocus.closest("details:not([open])")?.querySelector("summary") || previousFocus).focus();
+        }
       }).observe(overlay, { attributes: true, attributeFilter: ["hidden"] });
       overlay.addEventListener("keydown", event => {
         if (event.key !== "Tab") return;
