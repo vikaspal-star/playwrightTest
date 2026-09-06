@@ -367,9 +367,23 @@ function registerFolder(folder: string): void {
   saveFolders([...set]);
 }
 
+/**
+ * Test metadata is deliberately retained after a delete so historical runs keep
+ * their sharing rules. That retained entry must not go on claiming a place in
+ * the folder tree, so anything derived from "where tests live" looks only at
+ * metadata whose test still exists.
+ */
+function liveTestMeta(): TestMeta[] {
+  if (!fs.existsSync(JSON_DIR)) return [];
+  const onDisk = new Set(fs.readdirSync(JSON_DIR).filter(f => f.toLowerCase().endsWith(".json")));
+  return Object.entries(loadTestMeta())
+    .filter(([file]) => onDisk.has(file))
+    .map(([, meta]) => meta);
+}
+
 function allFolders(): string[] {
   const set = new Set(loadFolders());
-  for (const meta of Object.values(loadTestMeta())) {
+  for (const meta of liveTestMeta()) {
     if (meta.folder) for (const a of ancestorsOf(meta.folder)) set.add(a);
   }
   return [...set].sort();
@@ -1056,8 +1070,9 @@ app.delete("/api/folders", (req, res) => {
   const folder = normalizeFolder(String(req.query.path ?? ""));
   if (!folder) throw new HttpError(400, "Folder path is required.");
 
-  const meta = loadTestMeta();
-  const hasTests = Object.values(meta).some(m => m.folder === folder || m.folder?.startsWith(`${folder}/`));
+  // Only tests that still exist can hold a folder open; retained metadata from
+  // deleted tests would otherwise make the folder impossible to remove.
+  const hasTests = liveTestMeta().some(m => m.folder === folder || m.folder?.startsWith(`${folder}/`));
   if (hasTests) throw new HttpError(409, "Move or delete the tests in this folder first.");
 
   const stored = loadFolders();

@@ -1879,6 +1879,67 @@
   // Import / export
   // ---------------------------------------------------------
 
+  // Bringing a batch across from another tool means many files at once, so
+  // the whole selection is imported into one folder and reported together.
+  // One bad file must not abandon the rest of the batch.
+  async function importTestFiles(files) {
+    if (!files.length) return;
+    if (files.length === 1) return importTestFile(files[0]);
+
+    if (state.dirty && !(await confirmDialog("Discard unsaved test changes before importing?", { okLabel: "Discard", danger: true }))) return;
+
+    const folder = await promptDialog(
+      `Import ${files.length} files into which folder? Leave empty for no folder. Use / to nest, e.g. Reflect/Anomali:`,
+      { title: `Import ${files.length} tests`, okLabel: "Import", defaultValue: "" }
+    );
+    if (folder === null) return;
+
+    const imported = [];
+    const failed = [];
+    let skippedSteps = 0;
+
+    toast(`Importing ${files.length} files…`);
+    for (const file of files) {
+      let parsed;
+      try {
+        parsed = JSON.parse(await file.text());
+      } catch {
+        failed.push({ name: file.name, reason: "not valid JSON" });
+        continue;
+      }
+      try {
+        const res = await api("/api/tests/import", {
+          method: "POST",
+          body: JSON.stringify({ file: file.name, content: parsed, folder: folder.trim() || undefined })
+        });
+        skippedSteps += (res.skipped || []).length;
+        imported.push({ name: file.name, file: res.file, steps: res.imported, format: res.format, skipped: res.skipped || [] });
+      } catch (e) {
+        failed.push({ name: file.name, reason: e.message });
+      }
+    }
+
+    await Promise.all([loadTests(), loadFolders()]);
+    if (imported.length) await openTest(imported[0].file, { force: true });
+
+    const parts = [`Imported ${imported.length} of ${files.length} files`];
+    if (skippedSteps) parts.push(`${skippedSteps} steps could not be mapped`);
+    if (failed.length) parts.push(`${failed.length} failed`);
+    toast(parts.join(" · "), failed.length ? "error" : "ok");
+
+    // The detail matters when a batch is partly rejected, so keep it inspectable.
+    console.info("Import summary", { imported, failed });
+    if (failed.length) {
+      await showDialog({
+        title: "Import finished with problems",
+        message:
+          `${imported.length} of ${files.length} files imported.\n\n` +
+          failed.map(f => `${f.name}: ${f.reason}`).join("\n").slice(0, 1200),
+        okLabel: "Close"
+      });
+    }
+  }
+
   async function importTestFile(file) {
     if (state.dirty && !(await confirmDialog("Discard unsaved test changes before importing another test?", { okLabel: "Discard", danger: true }))) return;
     let parsed;
@@ -2109,9 +2170,9 @@
     $("btn-export").addEventListener("click", exportTest);
     $("btn-import").addEventListener("click", () => $("import-file").click());
     $("import-file").addEventListener("change", async e => {
-      const file = e.target.files && e.target.files[0];
+      const files = [...(e.target.files || [])];
       e.target.value = "";
-      if (file) await importTestFile(file);
+      await importTestFiles(files);
     });
   }
 

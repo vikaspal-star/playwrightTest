@@ -105,3 +105,45 @@ test("usernames cannot be created that render identically to an existing member"
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test("deleting a test frees its folder without exposing retained sharing metadata", { timeout: 20000 }, async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "mmqa-folder-"));
+  const server = launch(workspace);
+  try {
+    const url = await server.ready;
+    const send = (method: string, route: string, body?: unknown, cookie?: string) => fetch(`${url}${route}`, {
+      method,
+      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    });
+
+    const setup = await send("POST", "/api/auth/setup", { username: "owner", password: "safe-test-password" });
+    const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+
+    const created = await send("POST", "/api/tests", { file: "temp.json", name: "Temp", folder: "Archive/Old" }, cookie);
+    assert.equal(created.status, 201);
+
+    // A folder holding a live test cannot be removed.
+    assert.equal((await send("DELETE", "/api/folders?path=Archive%2FOld", undefined, cookie)).status, 409);
+
+    assert.equal((await send("DELETE", "/api/tests/temp.json", undefined, cookie)).status, 204);
+
+    // Sharing metadata is deliberately kept so historical runs stay protected,
+    // but it must not keep claiming a place in the folder tree.
+    const meta = JSON.parse(fs.readFileSync(path.join(workspace, "ui", "data", "testMeta.json"), "utf8"));
+    assert.ok(meta["temp.json"], "metadata is retained for historical run access");
+
+    assert.equal((await send("DELETE", "/api/folders?path=Archive%2FOld", undefined, cookie)).status, 204);
+    const folders = await (await send("GET", "/api/folders", undefined, cookie)).json();
+    assert.ok(!folders.includes("Archive/Old"), "the emptied folder should be gone");
+  } finally {
+    if (server.process.exitCode === null) {
+      const exited = once(server.process, "exit");
+      server.process.kill();
+      await exited;
+    }
+    assert.equal(path.dirname(path.resolve(workspace)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(workspace).startsWith("mmqa-folder-"));
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
