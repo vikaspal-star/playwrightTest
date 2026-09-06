@@ -59,3 +59,49 @@ test("server recovers orphaned runs, refuses a second writer, and fails closed o
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test("usernames cannot be created that render identically to an existing member", { timeout: 20000 }, async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "mmqa-username-"));
+  const server = launch(workspace);
+  try {
+    const url = await server.ready;
+    const json = (path: string, body: unknown, cookie?: string) => fetch(`${url}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+      body: JSON.stringify(body)
+    });
+
+    const setup = await json("/api/auth/setup", { username: "owner", password: "safe-test-password" });
+    assert.equal(setup.status, 201);
+    const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+
+    assert.equal((await json("/api/users", { username: "john smith", password: "safe-test-password" }, cookie)).status, 201);
+
+    // HTML collapses runs of whitespace, so a double-spaced name would be
+    // indistinguishable from the account above in the member list, the sharing
+    // picker and the per-user report. It must be treated as the same name.
+    const collision = await json("/api/users", { username: "john  smith", password: "safe-test-password" }, cookie);
+    assert.equal(collision.status, 400);
+    assert.match((await collision.json()).error, /already exists/);
+
+    for (const username of ["a/b", "-lead", "bad@name"]) {
+      const rejected = await json("/api/users", { username, password: "safe-test-password" }, cookie);
+      assert.equal(rejected.status, 400, `${username} should be rejected`);
+      assert.match((await rejected.json()).error, /letters, numbers/);
+    }
+
+    // Signing in still tolerates whitespace and case the user did not type exactly.
+    const login = await json("/api/auth/login", { username: "  JOHN   SMITH ", password: "safe-test-password" });
+    assert.equal(login.status, 200);
+    assert.equal((await login.json()).user.username, "john smith");
+  } finally {
+    if (server.process.exitCode === null) {
+      const exited = once(server.process, "exit");
+      server.process.kill();
+      await exited;
+    }
+    assert.equal(path.dirname(path.resolve(workspace)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(workspace).startsWith("mmqa-username-"));
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});

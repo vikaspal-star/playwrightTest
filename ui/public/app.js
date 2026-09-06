@@ -2327,7 +2327,19 @@
           el("span", { class: `member-avatar avatar-${u.role}`, "aria-hidden": "true", text: u.username.slice(0, 2).toUpperCase() }),
           el("div", { class: "member-details" },
             el("div", { class: "member-name-line" }, el("span", { class: "u-name", text: u.username }), isSelf ? el("span", { class: "member-self", text: "You" }) : null),
-            el("span", { class: `u-role role-${u.role}`, text: ROLE_LABELS[u.role] || u.role })),
+            el("div", { class: "member-role-line" },
+              el("span", { class: `u-role role-${u.role}`, text: ROLE_LABELS[u.role] || u.role }),
+              // Explicit grants replace the role defaults, so a "Member" here may
+              // have more or less access than the label implies. Say so, rather
+              // than making someone open each person to find out.
+              Array.isArray(u.features)
+                ? el("span", {
+                    class: "u-role role-custom",
+                    title: u.effectiveFeatures && u.effectiveFeatures.length
+                      ? `Custom access: ${u.effectiveFeatures.join(", ")}`
+                      : "Custom access: no features granted"
+                  }, "Custom access")
+                : null)),
           state.user.role === "site_admin"
             ? el("button", { class: "btn member-access", "aria-label": `Manage access for ${u.username}`, onclick: () => openFeaturesModal(u) }, "Manage access")
             : null,

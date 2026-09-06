@@ -144,17 +144,37 @@ export function listUsers(): PublicUser[] {
 }
 
 export function findUserByUsername(username: string): User | undefined {
-  return loadUsers().find(u => u.username.toLowerCase() === username.toLowerCase());
+  // Match the same normalization used when the account was created, so signing
+  // in tolerates stray or repeated whitespace and differing case.
+  const wanted = username.replace(/\s+/g, " ").trim().toLowerCase();
+  return loadUsers().find(u => u.username.replace(/\s+/g, " ").trim().toLowerCase() === wanted);
 }
 
 export function findUserById(id: string): User | undefined {
   return loadUsers().find(u => u.id === id);
 }
 
+// A username is this workspace's identity key: it attributes tests, addresses
+// sharing grants and notifications, and groups the reports. Two accounts must
+// never be able to look like each other, so runs of whitespace collapse to a
+// single space before the name is checked or stored. Without that,
+// "john smith" and "john  smith" are different accounts that render
+// identically wherever HTML collapses whitespace.
+export function normalizeUsername(username: string): string {
+  return username.replace(/\s+/g, " ").trim();
+}
+
+const USERNAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*(?: [A-Za-z0-9._-]+)*$/;
+
 export function createUser(username: string, password: string, role: Role, features?: string[]): PublicUser {
-  const clean = username.trim();
+  const clean = normalizeUsername(username);
   if (!clean) throw new ValidationError("Username is required.");
   if (clean.length > 80 || /[\x00-\x1f]/.test(clean)) throw new ValidationError("Username must be at most 80 characters without control characters.");
+  if (!USERNAME_PATTERN.test(clean)) {
+    throw new ValidationError(
+      "Username must start with a letter or number and use only letters, numbers, spaces, dots, hyphens and underscores."
+    );
+  }
   if (findUserByUsername(clean)) throw new ValidationError(`User "${clean}" already exists.`);
   const pwError = validatePassword(password);
   if (pwError) throw new ValidationError(pwError);

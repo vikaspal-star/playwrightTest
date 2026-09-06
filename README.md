@@ -80,6 +80,8 @@ Three roles, in a ladder:
 
 The **Manage users** dialog separates account creation from the member list, with labeled fields, role guidance, password visibility, and search by name or role.
 
+Usernames are the workspace identity key — they attribute tests, address sharing grants and notifications, and group the reports. They must start with a letter or number and use only letters, numbers, spaces, dots, hyphens and underscores, and repeated whitespace is collapsed before the name is stored, so two accounts can never render identically. A member whose grants differ from their role default is marked **Custom access** in the member list.
+
 Feature access is granular. The site admin selects **Manage access** beside a person in **Manage users** and ticks the features that account may use: creating, editing, deleting or running tests, managing folders and suites, viewing reports, using AI analysis, and managing users. Every one of those is enforced server-side.
 
 This is good local-tool hygiene, not a hardened multi-tenant auth system — don't expose this server beyond your own machine/network without more thought.

@@ -71,7 +71,7 @@
         <div class="users-section-heading"><h3 id="new-user-title">Add a teammate</h3><p>Create an account for your workspace.</p></div>
         <form id="add-user-form" class="new-user-form" autocomplete="off">
           <fieldset id="new-user-fields">
-            <div class="user-field"><label for="new-username">Username</label><input id="new-username" placeholder="e.g. alex" autocomplete="off" required maxlength="80" aria-describedby="new-username-help"><p id="new-username-help">They’ll use this name to sign in.</p></div>
+            <div class="user-field"><label for="new-username">Username</label><input id="new-username" placeholder="e.g. alex" autocomplete="off" required maxlength="80" aria-describedby="new-username-help"><p id="new-username-help">They’ll use this name to sign in. Letters, numbers, spaces, dots, hyphens and underscores.</p></div>
             <div class="user-field"><label for="new-password">Password</label><div class="new-user-password"><input id="new-password" type="password" placeholder="Create a password" autocomplete="new-password" required minlength="8" maxlength="256" aria-describedby="new-password-help"><button id="btn-toggle-new-password" type="button" aria-label="Show password" aria-pressed="false">Show</button></div><p id="new-password-help">At least 8 characters. They can change it later.</p></div>
             <div class="user-field"><label for="new-role">Role</label><select id="new-role" aria-describedby="new-role-help"><option value="member">Member</option><option value="admin">Admin</option><option value="site_admin">Site admin</option></select><p id="new-role-help"></p></div>
             <div id="users-error" class="auth-error" role="alert" hidden></div>

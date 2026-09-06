@@ -1416,3 +1416,12 @@ button, input, select { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Access that no longer matches the role's defaults, shown on the member row. */
+.member-role-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.u-role.role-custom {
+  background: #fef3c7;
+  color: #92400e;
+  cursor: help;
+}
