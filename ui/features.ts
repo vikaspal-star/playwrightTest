@@ -34,11 +34,11 @@ export const FEATURES: FeatureSpec[] = [
   { id: "tests.edit", label: "Edit tests", description: "Change steps and save test cases." },
   { id: "tests.delete", label: "Delete tests", description: "Remove test files from disk." },
   { id: "tests.run", label: "Run tests", description: "Execute a single test." },
-  { id: "folders.manage", label: "Manage folders", description: "Create, delete, and move tests between folders." },
+  { id: "folders.manage", label: "Manage projects", description: "Create projects and environments, configure their URLs, and move tests." },
   { id: "suites.manage", label: "Manage suites", description: "Create and edit suites (ordered test chains)." },
   { id: "suites.run", label: "Run suites", description: "Execute a whole suite in one browser session." },
   { id: "reports.view", label: "View reports", description: "See the aggregate pass/fail reporting dashboard." },
-  { id: "ai.analyze", label: "AI failure analysis", description: "Send failed steps to Anthropic's API for analysis (costs money per call)." },
+  { id: "ai.analyze", label: "AI analysis", description: "Review failures and environment adaptation with the configured AI provider." },
   { id: "users.manage", label: "Manage users", description: "Add and remove accounts." }
 ];
 

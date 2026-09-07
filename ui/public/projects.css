@@ -177,3 +177,16 @@
   padding: 2px 2px 0 30px;
 }
 #workspace .step-head { flex-wrap: wrap; }
+
+/* Department sits beside the role: it says where someone works, not what they
+   are allowed to do, so it reads quieter than the role badge. */
+.u-department {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #eef2f8;
+  color: #51617d;
+  border: 1px solid #e1e8f2;
+}

@@ -80,6 +80,8 @@ test("recordings are owned and cannot bypass the test editing feature", async ()
   try {
     expect((await member.get(`/api/record/${recording.id}`)).status()).toBe(404);
     expect((await member.get(`/api/record/${recording.id}/events`)).status()).toBe(404);
+    expect((await member.get(`/api/screen/${recording.id}/events`)).status()).toBe(404);
+    expect((await member.post(`/api/screen/${recording.id}/interact`, { data: { kind: "click", x: 0.5, y: 0.5 } })).status()).toBe(404);
     expect((await member.post(`/api/record/${recording.id}/stop`)).status()).toBe(404);
     expect((await member.post(`/api/record/${recording.id}/apply`, { data: { file: "session-first.json" } })).status()).toBe(403);
   } finally { await admin.post(`/api/record/${recording.id}/stop`); }
@@ -94,9 +96,11 @@ test("editor supports validation recovery, accessible labels and responsive over
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Workspace overview", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "+ Create a test", exact: true }).click();
-  await page.locator("#confirm-input").fill("editor-test.json");
-  await page.locator("#confirm-ok").click();
+  await page.getByRole("dialog", { name: "New test", exact: true }).getByLabel("Test name", { exact: true }).fill("Editor test");
+  await page.getByRole("dialog", { name: "New test", exact: true }).getByLabel("Project", { exact: true }).selectOption({ label: "General" });
+  await page.getByRole("button", { name: "Create test", exact: true }).click();
   await page.getByRole("button", { name: "+ Add step", exact: true }).click();
+  await page.getByRole("button", { name: "Add manually", exact: true }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.locator("#test-validation")).toContainText("selector is required");
   await page.getByLabel("Selector", { exact: false }).fill("#login-username");
@@ -137,11 +141,12 @@ test("libraries support folders, filters, draft navigation and mobile access", a
   expect((await admin.post("/api/tests", { data: { file: "partner-onboarding", name, folder, steps: [{ action: "wait", timeout: 1 }] } })).status()).toBe(201);
   await page.context().addCookies((await admin.storageState()).cookies);
   await page.goto("/#view:tests");
-  await expect(page.getByRole("heading", { name: /^Test library/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Projects/ })).toBeVisible();
   const partner = page.getByRole("button", { name: `Open test ${name}`, exact: true });
   await expect(partner).toBeVisible();
-  await page.getByRole("button", { name: `Collapse folder ${folder}`, exact: true }).click();
-  await expect(partner).toHaveCount(0);
+  await page.getByRole("button", { name: "Open project Partner", exact: true }).click();
+  await expect(partner).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open environment Sandbox", exact: true })).toBeVisible();
   await page.getByRole("searchbox", { name: "Search tests" }).fill("Channel partner");
   await expect(partner).toBeVisible();
   await expect(page.locator("#test-tree .test-item")).toHaveCount(1);
@@ -152,7 +157,7 @@ test("libraries support folders, filters, draft navigation and mobile access", a
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   await partner.click();
   await page.locator("#test-name").fill("Unsaved partner draft");
-  await page.getByRole("button", { name: "← Test library", exact: true }).click();
+  await page.getByRole("button", { name: "← Projects", exact: true }).click();
   await page.getByRole("button", { name: "+ New test", exact: true }).click();
   await expect(page.locator("#confirm-message")).toContainText("Discard unsaved test changes");
   await page.locator("#confirm-cancel").click();
@@ -267,6 +272,131 @@ test("user management supports account creation, search, role guidance and respo
     await managerPage.keyboard.press("Escape");
     await expect(managerPage.locator("#users-modal")).toBeHidden();
   } finally { await context.close(); }
+});
+
+test("projects, unique test names, embedded recording, insertion and live playback work together", async ({ page }) => {
+  test.setTimeout(120000);
+  const { createServer } = await import("node:http");
+  const fixture = createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(`<!doctype html><html><body style="font:18px Arial;background:#f5f8ff;margin:0"><h1 style="position:absolute;left:40px;top:8px">Partner application</h1><input id="name" aria-label="Name" placeholder="Name" style="position:absolute;left:40px;top:85px;width:260px;height:36px"><input id="password" type="password" aria-label="Password" style="position:absolute;left:40px;top:145px;width:260px;height:36px"><button id="save" style="position:absolute;left:40px;top:215px;width:140px;height:40px" onclick="document.getElementById('result').textContent='Saved '+document.getElementById('name').value">Save profile</button><h2 id="result" style="position:absolute;left:40px;top:290px">Pending</h2></body></html>`);
+  });
+  await new Promise<void>(resolve => fixture.listen(0, "127.0.0.1", resolve));
+  const address = fixture.address() as { port: number };
+  const url = `http://127.0.0.1:${address.port}/`;
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  let recordingId: string | undefined;
+  try {
+    await page.context().addCookies((await admin.storageState()).cookies);
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto("/#view:tests");
+    await page.getByRole("button", { name: "+ New project", exact: true }).click();
+    const projectDialog = page.getByRole("dialog", { name: "New project", exact: true });
+    await projectDialog.getByLabel("Project name", { exact: true }).fill("Recorder project");
+    await projectDialog.getByLabel("Application URL", { exact: true }).fill(url);
+    await projectDialog.getByRole("button", { name: "Create project", exact: true }).click();
+    await expect(projectDialog).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Open project Recorder project", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.getByRole("button", { name: "+ New test", exact: true }).click();
+    await page.getByRole("dialog", { name: "New test", exact: true }).getByLabel("Test name").fill("Recorded journey");
+    await page.getByRole("button", { name: "Create test", exact: true }).click();
+    await expect(page.locator("#test-name")).toHaveValue("Recorded journey");
+    const file = "recorded-journey.json";
+    const store = await (await admin.get("/api/projects")).json();
+    const assignment = store.assignments[file];
+    const repeat = await (await admin.post("/api/tests", { data: { name: "Recorded journey", ...assignment } })).json();
+    expect(repeat.file).toBe("recorded-journey-2.json");
+    await page.locator("#test-description").fill("Keep this unsaved description");
+    await page.getByRole("button", { name: "Record screen", exact: true }).click();
+    await expect(page.locator("#record-url")).toHaveValue(url);
+    const started = page.waitForResponse(response => response.url().endsWith("/api/record/start") && response.request().method() === "POST");
+    await page.getByRole("button", { name: "Start recording", exact: true }).click();
+    recordingId = (await (await started).json()).id;
+    await expect(page.locator("#record-screen-img")).toHaveAttribute("src", /^data:image\/jpeg;base64,/);
+    expect((await member.get(`/api/record/${recordingId}/screen`)).status()).toBe(404);
+    expect((await member.post(`/api/record/${recordingId}/input`, { data: { type: "click", x: 1, y: 1 } })).status()).toBe(404);
+    expect((await admin.post(`/api/record/${recordingId}/input`, { data: { type: "click", x: -10, y: 100 } })).status()).toBe(400);
+    expect((await admin.post(`/api/screen/${recordingId}/interact`, { data: { kind: "click", x: "bad", y: 0.5 } })).status()).toBe(400);
+    expect((await admin.post(`/api/screen/${recordingId}/interact`, { data: { kind: "move", x: 0.5, y: 0.5 } })).status()).toBe(204);
+    const streamed = await page.evaluate(id => new Promise<boolean>(resolve => {
+      const source = new EventSource(`/api/screen/${id}/events`);
+      const timer = setTimeout(() => { source.close(); resolve(false); }, 5000);
+      source.addEventListener("frame", event => {
+        const frame = JSON.parse((event as MessageEvent).data);
+        clearTimeout(timer); source.close(); resolve(frame.width === 1280 && frame.height === 800 && frame.data.length > 100);
+      });
+    }), recordingId);
+    expect(streamed).toBe(true);
+    const clickScreen = async (x: number, y: number) => {
+      const box = (await page.locator("#record-screen-img").boundingBox())!;
+      await page.mouse.click(box.x + x / 1280 * box.width, box.y + y / 800 * box.height);
+    };
+    await clickScreen(900, 500); // Background clicks should never become replay steps.
+    await clickScreen(90, 103);
+    await page.keyboard.type("Alex");
+    await expect.poll(async () => (await (await admin.get(`/api/record/${recordingId}`)).json()).steps.some((step: { value: string }) => step.value === "Alex")).toBe(true);
+    await clickScreen(90, 163);
+    await page.keyboard.type("private-recording-value");
+    await clickScreen(90, 235);
+    await expect.poll(async () => (await (await admin.get(`/api/record/${recordingId}`)).json()).steps.some((step: { selector: string; action: string }) => step.selector === "#save" && step.action === "click")).toBe(true);
+    await page.getByRole("button", { name: "Capture screenshot step", exact: true }).click();
+    await page.getByRole("button", { name: "Stop recording", exact: false }).click();
+    await expect(page.locator("#record-badge")).toHaveText("stopped");
+    const captured = await (await admin.get(`/api/record/${recordingId}`)).json();
+    expect(JSON.stringify(captured)).not.toContain("private-recording-value");
+    expect(captured.steps.find((step: { selector: string }) => step.selector === "#password").value).toBe("");
+    await page.screenshot({ path: "test-results/studio-embedded-recorder.png", fullPage: true });
+    await page.getByRole("button", { name: "Add to draft", exact: true }).click();
+    await expect(page.locator("#dirty")).toBeVisible();
+    await expect(page.locator("#test-description")).toHaveValue("Keep this unsaved description");
+    // The saved navigation is retained; the recorder's opening navigation is skipped.
+    await expect(page.locator("#steps .step-card")).toHaveCount(5);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.locator("#dirty")).toBeHidden();
+    const saved = await (await admin.get(`/api/tests/${file}`)).json();
+    expect(saved.description).toBe("Keep this unsaved description");
+    expect(saved.steps.map((step: { action: string }) => step.action)).toEqual(["navigate", "fill", "fill", "click", "screenshot"]);
+    // Add a meaningful assertion and enough time to verify frames during execution.
+    expect((await admin.put(`/api/tests/${file}`, { data: { ...saved, steps: [...saved.steps, { action: "text-visible", text: "Saved Alex" }, { action: "wait", timeout: 3000 }] } })).status()).toBe(200);
+    await page.reload();
+    await page.getByRole("button", { name: "Hide navigation", exact: true }).click();
+    await expect(page.locator(".app")).toHaveClass(/drawer-collapsed/);
+    await page.reload();
+    await expect(page.locator(".app")).toHaveClass(/drawer-collapsed/);
+    await page.keyboard.press("\\");
+    await expect(page.locator(".app")).not.toHaveClass(/drawer-collapsed/);
+    await page.keyboard.press("\\");
+    await expect(page.locator(".app")).toHaveClass(/drawer-collapsed/);
+    const left = (await page.locator("#workspace .pane-steps").boundingBox())!;
+    const right = (await page.locator("#workspace .pane-run").boundingBox())!;
+    expect(right.width).toBeGreaterThan(left.width * 2);
+    await page.locator("#btn-run").click();
+    await expect(page.locator("#viewer-img")).toHaveAttribute("src", /^data:image\/jpeg;base64,/, { timeout: 30000 });
+    await expect(page.locator("#playback-address")).toContainText(url);
+    await expect(page.locator("#run-status .badge")).toHaveText("passed", { timeout: 45000 });
+    await page.screenshot({ path: "test-results/studio-project-playback.png", fullPage: true });
+    const target = await (await admin.post("/api/projects", { data: { name: "Release project", environment: { name: "Production", type: "production", url: "https://destination.example/" } } })).json();
+    await page.goto(`/#${repeat.file}`);
+    await expect(page.locator("#test-file")).toContainText(repeat.file);
+    await page.locator("#btn-move-folder").click();
+    const move = page.getByRole("dialog", { name: "Move test · AI adaptation", exact: true });
+    await move.getByLabel("Project", { exact: true }).selectOption(target.id);
+    await move.getByRole("button", { name: "Review changes", exact: true }).click();
+    await expect(move).toContainText("1 URL changes proposed");
+    await expect(move).toContainText("Production selected");
+    await page.screenshot({ path: "test-results/studio-move-preview.png", fullPage: true });
+    await move.getByRole("button", { name: "Move test", exact: true }).click();
+    await expect(move).toHaveCount(0);
+    const moved = await (await admin.get(`/api/tests/${repeat.file}`)).json();
+    expect(moved.steps[0].url).toBe("https://destination.example/");
+    const afterMove = await (await admin.get("/api/projects")).json();
+    expect(afterMove.assignments[repeat.file].projectId).toBe(target.id);
+    expect(errors).toEqual([]);
+  } finally {
+    if (recordingId) await admin.post(`/api/record/${recordingId}/stop`);
+    await new Promise<void>(resolve => fixture.close(() => resolve()));
+  }
 });
 
 test("password form revokes other sessions and keeps the current session", async ({ playwright, page }) => {

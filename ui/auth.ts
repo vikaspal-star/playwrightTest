@@ -39,6 +39,8 @@ export interface User {
   createdAt: string;
   /** Explicit feature grants. Absent means "use the role defaults". */
   features?: string[];
+  /** Team this person belongs to. Descriptive only: it never grants access. */
+  department?: string;
 }
 
 export interface PublicUser {
@@ -47,6 +49,7 @@ export interface PublicUser {
   role: Role;
   createdAt: string;
   features?: string[];
+  department?: string;
   /** Resolved grants (role defaults merged with any explicit grants). */
   effectiveFeatures: string[];
 }
@@ -135,6 +138,17 @@ export function toPublicUser(user: User): PublicUser {
   return { ...pub, effectiveFeatures: effectiveFeatures(user.role, user.features) };
 }
 
+/** Departments already in use, so the UI can offer them rather than invent them. */
+export function listDepartments(): string[] {
+  const seen = new Map<string, string>();
+  for (const user of loadUsers()) {
+    if (!user.department) continue;
+    const key = user.department.toLowerCase();
+    if (!seen.has(key)) seen.set(key, user.department);
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
 export function hasAnyUser(): boolean {
   return loadUsers().length > 0;
 }
@@ -164,9 +178,30 @@ export function normalizeUsername(username: string): string {
   return username.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Departments are free text so a workspace is not forced through a schema
+ * change to add a team, but they are normalized so "QA", "qa " and "Q A"
+ * do not become three different-looking groups in the member list.
+ */
+export function normalizeDepartment(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (!clean) return undefined;
+  if (clean.length > 60 || /[\x00-\x1f]/.test(clean)) {
+    throw new ValidationError("Department must be at most 60 characters without control characters.");
+  }
+  return clean;
+}
+
 const USERNAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*(?: [A-Za-z0-9._-]+)*$/;
 
-export function createUser(username: string, password: string, role: Role, features?: string[]): PublicUser {
+export function createUser(
+  username: string,
+  password: string,
+  role: Role,
+  features?: string[],
+  department?: string
+): PublicUser {
   const clean = normalizeUsername(username);
   if (!clean) throw new ValidationError("Username is required.");
   if (clean.length > 80 || /[\x00-\x1f]/.test(clean)) throw new ValidationError("Username must be at most 80 characters without control characters.");
@@ -187,7 +222,8 @@ export function createUser(username: string, password: string, role: Role, featu
     salt,
     passwordHash: hashPassword(password, salt),
     createdAt: new Date().toISOString(),
-    ...(features ? { features: features.filter(f => FEATURE_IDS.includes(f)) } : {})
+    ...(features ? { features: features.filter(f => FEATURE_IDS.includes(f)) } : {}),
+    ...(normalizeDepartment(department) ? { department: normalizeDepartment(department) } : {})
   };
 
   const users = loadUsers();
@@ -197,7 +233,10 @@ export function createUser(username: string, password: string, role: Role, featu
 }
 
 /** Site-admin only: change a user's role and/or their explicit feature grants. */
-export function updateUser(id: string, changes: { role?: Role; features?: string[] | null }): PublicUser {
+export function updateUser(
+  id: string,
+  changes: { role?: Role; features?: string[] | null; department?: string | null }
+): PublicUser {
   const users = loadUsers();
   const user = users.find(u => u.id === id);
   if (!user) throw new ValidationError("User not found.");
@@ -207,6 +246,13 @@ export function updateUser(id: string, changes: { role?: Role; features?: string
       throw new ValidationError("Promote another account to site admin first.");
     }
     user.role = changes.role;
+  }
+
+  if (changes.department === null) delete user.department;
+  else if (changes.department !== undefined) {
+    const department = normalizeDepartment(changes.department);
+    if (department) user.department = department;
+    else delete user.department;
   }
 
   if (changes.features === null) delete user.features;

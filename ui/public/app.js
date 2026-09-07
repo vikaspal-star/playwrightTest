@@ -2545,6 +2545,20 @@
 
   let managedUsers = [];
 
+  // Offer the teams that already exist rather than inviting a second spelling
+  // of one; the field stays free text so a new team needs no setup.
+  async function loadDepartmentOptions() {
+    let departments = [];
+    try {
+      departments = await api("/api/departments");
+    } catch {
+      return;
+    }
+    const list = $("department-options");
+    if (!list) return;
+    list.replaceChildren(...departments.map(d => el("option", { value: d })));
+  }
+
   async function renderUsersList() {
     const message = $("users-list-message");
     message.textContent = "Loading members…";
@@ -2554,6 +2568,7 @@
     try {
       managedUsers = await api("/api/users");
       drawManagedUsers();
+      void loadDepartmentOptions();
     } catch (e) {
       message.textContent = `${e.message} Use Refresh members to try again.`;
       message.hidden = false;
@@ -2565,7 +2580,7 @@
 
   function drawManagedUsers() {
     const query = $("users-search").value.trim().toLowerCase();
-    const users = managedUsers.filter(user => `${user.username} ${ROLE_LABELS[user.role] || user.role}`.toLowerCase().includes(query));
+    const users = managedUsers.filter(user => `${user.username} ${ROLE_LABELS[user.role] || user.role} ${user.department || ""}`.toLowerCase().includes(query));
     $("users-count").textContent = managedUsers.length;
     $("users-list-message").hidden = users.length > 0;
     $("users-list-message").textContent = query ? "No matching members. Try another name or role." : "No members to show.";
@@ -2580,6 +2595,7 @@
             el("div", { class: "member-name-line" }, el("span", { class: "u-name", text: u.username }), isSelf ? el("span", { class: "member-self", text: "You" }) : null),
             el("div", { class: "member-role-line" },
               el("span", { class: `u-role role-${u.role}`, text: ROLE_LABELS[u.role] || u.role }),
+              u.department ? el("span", { class: "u-department", title: `Department: ${u.department}` }, u.department) : null,
               // Explicit grants replace the role defaults, so a "Member" here may
               // have more or less access than the label implies. Say so, rather
               // than making someone open each person to find out.
@@ -2714,6 +2730,7 @@
     };
     $("features-user").textContent = user.username;
     $("features-role").value = user.role;
+    $("features-department").value = user.department || "";
     renderFeaturesModal();
     $("features-modal").hidden = false;
   }
@@ -2756,6 +2773,7 @@
         method: "PUT",
         body: JSON.stringify({
           role: featureDraft.role,
+          department: $("features-department").value,
           features: featureDraft.role === "site_admin" ? null : featureDraft.features
         })
       });

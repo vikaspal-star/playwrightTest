@@ -147,3 +147,116 @@ test("deleting a test frees its folder without exposing retained sharing metadat
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test("project migration is additive; test creation and moves preserve data and reject stale previews", { timeout: 20000 }, async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "mmqa-projects-"));
+  const data = path.join(workspace, "ui", "data");
+  fs.mkdirSync(data, { recursive: true });
+  fs.mkdirSync(path.join(workspace, "json"));
+  const original = JSON.stringify({ name: "Partner journey", steps: [{ action: "navigate", url: "https://coro.sb.example/login" }, { action: "fill", selector: "#name", value: "existing input" }] });
+  const metadata = JSON.stringify({ "partner.json": { folder: "Coro Sandbox/Channel Partner", createdBy: "owner", visibility: "restricted", sharedWith: [] } });
+  fs.writeFileSync(path.join(data, "folders.json"), JSON.stringify(["Acronis", "Coro Sandbox/Channel Partner"]));
+  fs.writeFileSync(path.join(data, "testMeta.json"), metadata);
+  fs.writeFileSync(path.join(workspace, "json", "partner.json"), original);
+  const server = launch(workspace);
+  try {
+    const url = await server.ready;
+    const request = (route: string, method = "GET", body?: unknown, cookie?: string) => fetch(url + route, { method, headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const setup = await request("/api/auth/setup", "POST", { username: "owner", password: "safe-test-password" });
+    const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+    const api = (route: string, method = "GET", body?: unknown) => request(route, method, body, cookie);
+    const first = await (await api("/api/projects")).json();
+    assert.deepEqual(first.projects.map((p: { name: string }) => p.name).sort(), ["Acronis", "Coro"]);
+    assert.equal(fs.readFileSync(path.join(data, "testMeta.json"), "utf8"), metadata);
+    assert.equal(fs.readFileSync(path.join(workspace, "json", "partner.json"), "utf8"), original);
+    assert.deepEqual(await (await api("/api/projects")).json(), first);
+    const created = await api("/api/projects", "POST", { name: "Anomali", environment: { name: "Production", type: "production", url: "https://anomali.example/" } });
+    assert.equal(created.status, 201);
+    const target = await created.json();
+    const destination = { projectId: target.id, environmentId: target.environments[0].id };
+    const firstNew = await (await api("/api/tests", "POST", { name: "New test", ...destination })).json();
+    const secondNew = await (await api("/api/tests", "POST", { name: "New test", ...destination })).json();
+    assert.equal(firstNew.file, "new-test.json");
+    assert.equal(secondNew.file, "new-test-2.json");
+    assert.deepEqual(firstNew.steps, [{ action: "navigate", url: "https://anomali.example/" }]);
+    assert.equal((await api("/api/tests", "POST", { file: "new-test.json" })).status, 409);
+    const preview = await (await api("/api/tests/partner.json/move-preview", "POST", destination)).json();
+    assert.equal(preview.changes[0].after, "https://anomali.example/login");
+    await api("/api/tests/partner.json", "PUT", { name: "Edited while reviewing", steps: JSON.parse(original).steps });
+    assert.equal((await api("/api/tests/partner.json/move", "POST", { ...destination, revision: preview.revision, adaptUrls: true })).status, 409);
+    const refreshed = await (await api("/api/tests/partner.json/move-preview", "POST", destination)).json();
+    const moved = await (await api("/api/tests/partner.json/move", "POST", { ...destination, revision: refreshed.revision, adaptUrls: true })).json();
+    assert.equal(moved.name, "Edited while reviewing");
+    assert.equal(moved.steps[0].url, "https://anomali.example/login");
+    assert.equal(moved.steps[1].value, "existing input");
+    assert.equal(moved.meta.folder, "Coro Sandbox/Channel Partner");
+    assert.equal(moved.meta.visibility, "restricted");
+    assert.ok(fs.readdirSync(path.join(data, "project-moves")).length > 0);
+    const final = await (await api("/api/projects")).json();
+    assert.deepEqual(final.assignments["partner.json"], destination);
+    const badScope = { projectId: first.projects[0].id, environmentId: destination.environmentId };
+    assert.equal((await api("/api/tests/partner.json/move-preview", "POST", badScope)).status, 400);
+    assert.equal((await request("/api/projects")).status, 401);
+    await api("/api/users", "POST", { username: "viewer", password: "safe-test-password", role: "member", features: ["folders.manage", "tests.edit"] });
+    const login = await request("/api/auth/login", "POST", { username: "viewer", password: "safe-test-password" });
+    const viewerCookie = login.headers.get("set-cookie")!.split(";")[0];
+    assert.equal((await request("/api/tests/partner.json/move-preview", "POST", destination, viewerCookie)).status, 404);
+    assert.equal((await (await request("/api/projects", "GET", undefined, viewerCookie)).json()).assignments["partner.json"], undefined);
+  } finally {
+    if (server.process.exitCode === null) { const exited = once(server.process, "exit"); server.process.kill(); await exited; }
+    assert.equal(path.dirname(path.resolve(workspace)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(workspace).startsWith("mmqa-projects-"));
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("departments are attached to accounts and normalized so a team is spelled one way", { timeout: 20000 }, async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "mmqa-dept-"));
+  const server = launch(workspace);
+  try {
+    const url = await server.ready;
+    const send = (method: string, route: string, body?: unknown, cookie?: string) => fetch(`${url}${route}`, {
+      method,
+      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    });
+
+    const setup = await send("POST", "/api/auth/setup", { username: "owner", password: "safe-test-password" });
+    const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+
+    // Stray and repeated whitespace must not create a second "QA".
+    const created = await send("POST", "/api/users", { username: "tester", password: "safe-test-password", department: "  Q  A  " }, cookie);
+    assert.equal(created.status, 201);
+    assert.equal((await created.json()).department, "Q A");
+
+    const second = await send("POST", "/api/users", { username: "other", password: "safe-test-password", department: "QA" }, cookie);
+    const otherId = (await second.json()).id;
+
+    // A department is descriptive, never a grant.
+    const users = await (await send("GET", "/api/users", undefined, cookie)).json();
+    const other = users.find((u: { id: string }) => u.id === otherId);
+    assert.equal(other.department, "QA");
+    assert.ok(!other.effectiveFeatures.includes("users.manage"), "a department must not confer access");
+
+    // Editing and clearing both work.
+    await send("PUT", `/api/users/${otherId}`, { department: "Engineering" }, cookie);
+    assert.equal((await (await send("GET", "/api/users", undefined, cookie)).json())
+      .find((u: { id: string }) => u.id === otherId).department, "Engineering");
+
+    await send("PUT", `/api/users/${otherId}`, { department: "" }, cookie);
+    assert.equal((await (await send("GET", "/api/users", undefined, cookie)).json())
+      .find((u: { id: string }) => u.id === otherId).department, undefined);
+
+    const departments = await (await send("GET", "/api/departments", undefined, cookie)).json();
+    assert.deepEqual(departments, ["Q A"], "only departments still in use are offered");
+  } finally {
+    if (server.process.exitCode === null) {
+      const exited = once(server.process, "exit");
+      server.process.kill();
+      await exited;
+    }
+    assert.equal(path.dirname(path.resolve(workspace)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(workspace).startsWith("mmqa-dept-"));
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});

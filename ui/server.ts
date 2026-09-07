@@ -33,6 +33,7 @@ import {
   deleteUser,
   destroySession,
   hasAnyUser,
+  listDepartments,
   listUsers,
   toPublicUser,
   updateUser,
@@ -52,11 +53,13 @@ import { RunLike, buildReport } from "./reports";
 import { importTest } from "./importers";
 import * as recorder from "./recorder";
 import * as screencast from "./agent/screencast";
-import { AnalysisResult, analyzeFailure, analyzeRun, isConfigured as aiConfigured } from "./anthropic";
+import { AnalysisResult, analyzeFailure, analyzeRun, analyzeAdaptation, isConfigured as aiConfigured } from "./anthropic";
 import { ROOT, WORKSPACE, JSON_DIR, SUITES_DIR, RUNS_DIR, DATA_DIR, HOST, PORT, MAX_ACTIVE_RUNS, RUN_TIMEOUT_MS } from "./config";
 import { readJson, writeJson, acquireWorkspaceLock } from "./storage";
 import { validateTest, ValidationError } from "../src/validation";
 import { securityHeaders, sameOrigin, authRateLimit } from "./security";
+import { addProject, addEnvironment, destination, environmentUrl, projectName, reconcileProjects, saveProjects, adaptationPlan, revision } from "./projects";
+import { startLiveScreen } from "../src/liveScreen";
 
 const PUBLIC_DIR = path.join(__dirname, "public");
 const TEST_META_FILE = path.join(DATA_DIR, "testMeta.json");
@@ -598,16 +601,26 @@ function startRun(file: string, startedBy: string): RunRecord {
 
   const active: ActiveRun = { record, listeners: new Set(), stop: () => {
     record.error ??= "Run stopped by user.";
+    // Let the Playwright worker close its browser even where Windows blocks taskkill.
+    fs.writeFileSync(path.join(dir, ".cancel"), "stop", { mode: 0o600 });
+    setTimeout(() => {
+    if (proc.exitCode !== null) return;
     if (process.platform === "win32" && proc.pid) {
       const killer = spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
       killer.on("error", () => proc.kill());
+      killer.on("exit", code => { if (code !== 0) proc.kill(); });
     } else if (proc.pid) {
       try { process.kill(-proc.pid, "SIGKILL"); } catch { proc.kill("SIGKILL"); }
     }
+    }, 5000).unref();
   } };
   activeRuns.set(id, active);
 
   const handleLine = (line: string): void => {
+    if (line.startsWith("@@FRAME ")) {
+      try { broadcast(active, "frame", JSON.parse(line.slice(8))); } catch { /* incomplete frame */ }
+      return;
+    }
     record.log.push(line);
     if (record.log.length > 2000) record.log.shift();
     broadcast(active, "log", { line });
@@ -873,6 +886,7 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
           log(`ACTION: ${t.steps[i].action}`);
 
           const startedAt = Date.now();
+          const stopScreen = startLiveScreen(() => executor.currentPage, frame => broadcast(active, "frame", { ...frame, index: step.index }));
           try {
             await executor.execute(t.steps[i]);
             step.durationMs = Date.now() - startedAt;
@@ -887,7 +901,7 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
             if (!suite.continueOnFailure) haltSuite = true;
             log(`✗ Step ${step.index} Failed`);
             log(step.error);
-          }
+          } finally { await stopScreen(); }
 
           try {
             fs.mkdirSync(dir, { recursive: true });
@@ -987,7 +1001,7 @@ app.get("/api/users", (req, res) => {
 
 app.post("/api/users", (req, res) => {
   const actor = requireFeature(req, "users.manage");
-  const body = (req.body ?? {}) as { username?: unknown; password?: unknown; role?: unknown; features?: unknown };
+  const body = (req.body ?? {}) as { username?: unknown; password?: unknown; role?: unknown; features?: unknown; department?: unknown };
   const role: Role = normalizeRole(body.role);
   // Only the site admin may mint other admins or site admins.
   if (role !== "member" && actor.role !== "site_admin") {
@@ -997,7 +1011,13 @@ app.post("/api/users", (req, res) => {
   if (features && actor.role !== "site_admin") {
     throw new HttpError(403, "Only the site admin can set feature access.");
   }
-  const user = createUser(String(body.username ?? ""), String(body.password ?? ""), role, features);
+  const user = createUser(
+    String(body.username ?? ""),
+    String(body.password ?? ""),
+    role,
+    features,
+    typeof body.department === "string" ? body.department : undefined
+  );
   notify(user.username, {
     type: "system",
     title: "Welcome to Test Studio",
@@ -1009,8 +1029,11 @@ app.post("/api/users", (req, res) => {
 // Site admin only: change a user's role and/or feature grants.
 app.put("/api/users/:id", (req, res) => {
   const actor = requireSiteAdmin(req);
-  const body = (req.body ?? {}) as { role?: unknown; features?: unknown };
-  const changes: { role?: Role; features?: string[] | null } = {};
+  const body = (req.body ?? {}) as { role?: unknown; features?: unknown; department?: unknown };
+  const changes: { role?: Role; features?: string[] | null; department?: string | null } = {};
+  // An empty string clears the department; omitting the field leaves it alone.
+  if (body.department === null || body.department === "") changes.department = null;
+  else if (typeof body.department === "string") changes.department = body.department;
   if (body.role !== undefined) changes.role = normalizeRole(body.role);
   if (body.features === null) changes.features = null;
   else if (Array.isArray(body.features)) changes.features = body.features.map(String);
@@ -1037,6 +1060,13 @@ app.delete("/api/users/:id", (req, res) => {
   res.status(204).end();
 });
 
+// Departments already in use, so the UI can offer them instead of inviting a
+// new spelling of an existing team.
+app.get("/api/departments", (req, res) => {
+  requireAuth(req);
+  res.json(listDepartments());
+});
+
 // The feature catalog, so the site admin UI can render grant checkboxes.
 app.get("/api/features", (req, res) => {
   requireAuth(req);
@@ -1050,7 +1080,107 @@ app.get("/api/actions", (req, res) => {
   res.json({ actions: ACTION_CATALOG, fields: FIELD_META });
 });
 
-// ---- Folders ----
+// ---- Projects and environments ----
+function projectStore() {
+  const tests = fs.existsSync(JSON_DIR) ? fs.readdirSync(JSON_DIR).filter(file => FILE_RE.test(file)).map(file => {
+    let steps: Record<string, unknown>[] = [];
+    try { steps = readTest(file).steps; } catch { /* Preserve invalid legacy tests for editing. */ }
+    return { file, folder: getTestMeta(file).folder, steps };
+  }) : [];
+  return reconcileProjects(tests, allFolders());
+}
+
+app.get("/api/projects", (req, res) => {
+  const user = requireAuth(req);
+  const store = projectStore();
+  res.json({ ...store, assignments: Object.fromEntries(Object.entries(store.assignments).filter(([file]) => fs.existsSync(testPath(file)) && resolveAccess(getTestMeta(file), user) !== null)) });
+});
+app.post("/api/projects", (req, res) => {
+  requireFeature(req, "folders.manage");
+  const store = projectStore();
+  try {
+    const project = addProject(store, req.body?.name);
+    if (req.body?.environment) addEnvironment(project, req.body.environment);
+    saveProjects(store);
+    res.status(201).json(project);
+  } catch (error) { throw new HttpError(400, (error as Error).message); }
+});
+app.post("/api/projects/:id/environments", (req, res) => {
+  requireFeature(req, "folders.manage");
+  const store = projectStore();
+  const project = store.projects.find(p => p.id === req.params.id);
+  if (!project) throw new HttpError(404, "Project not found.");
+  try { const environment = addEnvironment(project, req.body || {}); saveProjects(store); res.status(201).json(environment); }
+  catch (error) { throw new HttpError(400, (error as Error).message); }
+});
+app.put("/api/projects/:id/environments/:environmentId", (req, res) => {
+  requireFeature(req, "folders.manage");
+  const store = projectStore();
+  try {
+    const { project, environment } = destination(store, req.params.id, req.params.environmentId);
+    const name = projectName(req.body?.name);
+    if (project.environments.some(e => e.id !== environment.id && e.name.toLowerCase() === name.toLowerCase())) throw new Error("This environment name already exists.");
+    if (!["sandbox", "production"].includes(req.body?.type)) throw new Error("Choose Sandbox or Production.");
+    Object.assign(environment, { name, type: req.body.type, url: environmentUrl(req.body.url) });
+    saveProjects(store);
+    res.json(environment);
+  } catch (error) { throw new HttpError(400, (error as Error).message); }
+});
+
+function moveContext(req: Request) {
+  const user = requireFeature(req, "folders.manage");
+  requireFeature(req, "tests.edit");
+  const file = safeFile(String(req.params.file));
+  if (!fs.existsSync(testPath(file)) || resolveAccess(getTestMeta(file), user) === null) throw new HttpError(404, "Test not found.");
+  if (resolveAccess(getTestMeta(file), user) !== "edit") throw new HttpError(403, "You only have view access to this test.");
+  if (testInUse(file)) throw new HttpError(409, "Wait for the active run to finish before moving this test.");
+  const store = projectStore();
+  let target;
+  try { target = destination(store, req.body?.projectId, req.body?.environmentId); }
+  catch (error) { throw new HttpError(400, (error as Error).message); }
+  const assignment = store.assignments[file];
+  const source = store.projects.find(p => p.id === assignment?.projectId)?.environments.find(e => e.id === assignment?.environmentId);
+  const test = readTest(file);
+  const plan = adaptationPlan(test.steps, source?.url || "", target.environment);
+  const token = revision({ test, meta: getTestMeta(file), assignment, source, target });
+  return { user, file, store, test, target, plan, token };
+}
+app.post("/api/tests/:file/move-preview", (req, res) => {
+  const { target, plan, token } = moveContext(req);
+  res.json({ project: target.project.name, environment: target.environment, changes: plan.changes, review: plan.review, revision: token, aiAvailable: aiConfigured() });
+});
+app.post("/api/tests/:file/move-analysis", async (req, res) => {
+  requireFeature(req, "ai.analyze");
+  const context = moveContext(req);
+  if (context.token !== req.body?.revision) throw new HttpError(409, "Refresh the move preview before requesting AI analysis.");
+  if (!aiConfigured()) throw new HttpError(503, "Configure the AI provider on the server to request an AI review. URL adaptation remains available.");
+  const assignment = context.store.assignments[context.file];
+  const sourceType = context.store.projects.find(p => p.id === assignment?.projectId)?.environments.find(e => e.id === assignment?.environmentId)?.type || "unknown";
+  let advice: string;
+  try {
+    advice = await analyzeAdaptation({ sourceType, targetType: context.target.environment.type, actions: context.test.steps.map(step => String(step.action)).filter(action => ACTION_CATALOG.some(spec => spec.action === action)), urlChanges: context.plan.changes.length, selectors: context.test.steps.filter(step => step.selector).length, inputSteps: context.test.steps.filter(step => step.value !== undefined).length });
+  } catch (error) { throw new HttpError(502, (error as Error).message); }
+  if (moveContext(req).token !== context.token) throw new HttpError(409, "The test or environment changed during analysis. Refresh the preview.");
+  res.json({ advice, revision: context.token });
+});
+app.post("/api/tests/:file/move", (req, res) => {
+  const { user, file, store, test, target, plan, token } = moveContext(req);
+  if (req.body?.revision !== token) throw new HttpError(409, "The test or environment changed. Refresh the preview before moving.");
+  const oldAssignment = store.assignments[file];
+  const updated = req.body?.adaptUrls === true ? validateTestBody({ ...test, steps: plan.nextSteps }) : test;
+  // A recovery copy is retained before modifying either the test or its assignment.
+  const backup = path.join(DATA_DIR, "project-moves", `${Date.now()}-${token.slice(0, 12)}.json`);
+  writeJson(backup, { file, test, assignment: oldAssignment, target: { projectId: target.project.id, environmentId: target.environment.id }, by: user.username });
+  writeTest(file, { ...updated });
+  try {
+    store.assignments[file] = { projectId: target.project.id, environmentId: target.environment.id };
+    saveProjects(store);
+  } catch (error) { writeTest(file, { ...test }); throw error; }
+  const meta = touchTestMeta(file, user.username, false);
+  res.json({ ...readTest(file), meta, access: "edit", changes: req.body?.adaptUrls === true ? plan.changes.length : 0 });
+});
+
+// Legacy folder APIs remain compatible with existing integrations and imports.
 
 app.get("/api/folders", (req, res) => {
   requireAuth(req);
@@ -1139,21 +1269,34 @@ app.get("/api/tests/:file", (req, res) => {
 
 app.post("/api/tests", (req, res) => {
   const user = requireFeature(req, "tests.create");
-  const body = (req.body ?? {}) as { file?: unknown; name?: unknown; steps?: unknown; folder?: unknown };
+  const body = (req.body ?? {}) as { file?: unknown; name?: unknown; steps?: unknown; folder?: unknown; projectId?: unknown; environmentId?: unknown };
   const raw = String(body.file ?? "").trim();
-  const file = safeFile(raw.toLowerCase().endsWith(".json") ? raw : `${raw}.json`);
+  const stem = String(body.name || "New test").replace(/\.json$/i, "").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90).toLowerCase() || "new-test";
+  let file = raw ? safeFile(raw.toLowerCase().endsWith(".json") ? raw : `${raw}.json`) : `${stem}.json`;
+  let suffix = 2;
+  while (!raw && fs.existsSync(testPath(file))) file = `${stem}-${suffix++}.json`;
   if (fs.existsSync(testPath(file))) throw new HttpError(409, `${file} already exists`);
+
+  const store = projectStore();
+  let target;
+  if (body.projectId || body.environmentId) {
+    try { target = destination(store, body.projectId, body.environmentId); }
+    catch (error) { throw new HttpError(400, (error as Error).message); }
+  }
 
   const data = validateTestBody({
     name: body.name ?? file.replace(/\.json$/, ""),
     steps: Array.isArray(body.steps) && body.steps.length
       ? body.steps
-      : []
+      : target?.environment.url ? [{ action: "navigate", url: target.environment.url }] : []
   });
   const folder = typeof body.folder === "string" && body.folder.trim() ? normalizeFolder(body.folder) : undefined;
   writeTest(file, data);
   if (folder) registerFolder(folder);
   const meta = touchTestMeta(file, user.username, true, folder ? { folder } : {});
+  delete store.assignments[file];
+  if (target) store.assignments[file] = { projectId: target.project.id, environmentId: target.environment.id };
+  saveProjects(store);
 
   res.status(201).json({ ...readTest(file), meta, access: "edit" as Access });
 });
@@ -1390,11 +1533,12 @@ app.get("/api/runs/:id/events", (req, res) => {
 app.get("/api/reports/summary", (req, res) => {
   const user = requireFeature(req, "reports.view");
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+  const projects = projectStore();
   res.json(buildReport(
     listRuns().filter(rec => canReadRun(rec, user)) as unknown as RunLike[],
     days,
     new Map(
-      Object.entries(loadTestMeta()).filter(([file]) => canReadTest(file, user)).map(([file, meta]) => [file, meta.folder ?? ""])
+      Object.entries(projects.assignments).filter(([file]) => canReadTest(file, user)).map(([file, assignment]) => [file, projects.projects.find(project => project.id === assignment.projectId)?.name || ""])
     ),
     fs.existsSync(JSON_DIR)
       ? fs.readdirSync(JSON_DIR).filter(f => f.toLowerCase().endsWith(".json") && canReadTest(f, user))
@@ -1422,7 +1566,13 @@ app.post("/api/notifications/read", (req, res) => {
 // Accepts a Test Studio export or a Reflect export and writes it as a new test.
 app.post("/api/tests/import", (req, res) => {
   const user = requireFeature(req, "tests.create");
-  const body = (req.body ?? {}) as { file?: unknown; folder?: unknown; content?: unknown };
+  const body = (req.body ?? {}) as { file?: unknown; folder?: unknown; content?: unknown; projectId?: unknown; environmentId?: unknown };
+  const store = projectStore();
+  let target;
+  if (body.projectId || body.environmentId) {
+    try { target = destination(store, body.projectId, body.environmentId); }
+    catch (error) { throw new HttpError(400, (error as Error).message); }
+  }
 
   let result: ReturnType<typeof importTest>;
   try { result = importTest(body.content); } catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "Invalid import."); }
@@ -1454,7 +1604,9 @@ app.post("/api/tests/import", (req, res) => {
   writeTest(file, data);
   if (folder) registerFolder(folder);
   const meta = touchTestMeta(file, user.username, true, folder ? { folder } : {});
-
+  delete store.assignments[file];
+  if (target) store.assignments[file] = { projectId: target.project.id, environmentId: target.environment.id };
+  saveProjects(store);
   res.status(201).json({
     file,
     format: result.format,
@@ -1464,92 +1616,17 @@ app.post("/api/tests/import", (req, res) => {
   });
 });
 
-// ---- Live screen ----
-//
-// The browser the studio drives is streamed into the app so recording and
-// running are watched in place. Only the person who owns the session may
-// watch or drive it.
-
-function requireOwnedScreen(req: Request, id: string): void {
-  const user = requireAuth(req);
-  const session = recorder.get(id);
-  if (!session) throw new HttpError(404, "That screen is not available.");
-  if (session.startedBy !== user.username && !isAdminish(user)) {
-    throw new HttpError(403, "That screen belongs to someone else.");
-  }
-}
-
-app.get("/api/screen/:id/events", (req, res) => {
-  requireOwnedScreen(req, req.params.id);
-  if (!screencast.isActive(req.params.id)) throw new HttpError(404, "That screen is not live.");
-
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive"
-  });
-
-  // Frames arrive faster than a panel needs them; sending every one wastes
-  // bandwidth and can outrun the client, so coalesce to a steady rate.
-  let pending: screencast.Frame | undefined;
-  const flush = setInterval(() => {
-    if (!pending) return;
-    sse(res, "frame", pending);
-    pending = undefined;
-  }, 120);
-
-  const unsubscribe = screencast.subscribe(req.params.id, frame => { pending = frame; });
-  req.on("close", () => {
-    clearInterval(flush);
-    unsubscribe();
-  });
-});
-
-app.post("/api/screen/:id/interact", async (req, res) => {
-  requireOwnedScreen(req, req.params.id);
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const kind = String(body.kind ?? "");
-  const number = (value: unknown): number => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  try {
-    if (kind === "click" || kind === "move") {
-      await screencast.interact(req.params.id, {
-        kind,
-        x: number(body.x),
-        y: number(body.y),
-        button: body.button === "right" ? "right" : "left",
-        clickCount: body.clickCount === 2 ? 2 : 1
-      } as screencast.PointerAction);
-    } else if (kind === "scroll") {
-      await screencast.interact(req.params.id, { kind, x: number(body.x), y: number(body.y), deltaY: number(body.deltaY) });
-    } else if (kind === "type") {
-      await screencast.interact(req.params.id, { kind, text: String(body.text ?? "").slice(0, 500) });
-    } else if (kind === "key") {
-      await screencast.interact(req.params.id, { kind, key: String(body.key ?? "").slice(0, 40) });
-    } else {
-      throw new HttpError(400, `Unsupported interaction: ${kind}`);
-    }
-  } catch (e) {
-    if (e instanceof HttpError) throw e;
-    throw new HttpError(409, e instanceof Error ? e.message : String(e));
-  }
-  res.status(204).end();
-});
-
 // ---- Recorder ----
 
 app.post("/api/record/start", async (req, res) => {
   const user = requireFeature(req, "tests.create");
-  const body = (req.body ?? {}) as { url?: unknown };
+  const body = (req.body ?? {}) as { url?: unknown; embedded?: unknown };
   const url = String(body.url ?? "").trim();
   if (!/^https?:\/\//i.test(url)) {
     throw new HttpError(400, "Enter a URL starting with http:// or https://");
   }
   try {
-    const session = await recorder.start(url, user.username);
+    const session = await recorder.start(url, user.username, { embedded: body.embedded !== false });
     res.status(201).json(session);
   } catch (e) {
     throw new HttpError(500, `Could not open a browser: ${e instanceof Error ? e.message : String(e)}`);
@@ -1560,6 +1637,60 @@ app.get("/api/record/:id", (req, res) => {
   const session = requireRecording(req);
   res.json(session);
 });
+
+app.get("/api/record/:id/screen", async (req, res) => {
+  const session = requireRecording(req);
+  if (session.startedBy !== requireAuth(req).username) throw new HttpError(404, "Recording not found.");
+  res.setHeader("Cache-Control", "no-store");
+  if (session.status !== "recording") throw new HttpError(409, "The recording has stopped.");
+  try { res.json(await recorder.screen(session.id)); }
+  catch { throw new HttpError(409, "Screen is changing. Try again in a moment."); }
+});
+async function recordingInput(req: Request, res: Response, normalized = false) {
+  const session = requireRecording(req);
+  requireFeature(req, "tests.create");
+  if (session.startedBy !== requireAuth(req).username) throw new HttpError(404, "Recording not found.");
+  const raw = req.body || {};
+  const body = normalized ? { ...raw, type: ({ scroll: "wheel", type: "text" } as Record<string, string>)[raw.kind] || raw.kind, normalized: true } : { ...raw, normalized: false };
+  const numberIn = (value: unknown, min: number, max: number) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+  const coordinates = numberIn(body.x, 0, normalized ? 1 : 1279) && numberIn(body.y, 0, normalized ? 1 : 799);
+  const valid = body.type === "click" ? coordinates && (body.button === undefined || ["left", "right"].includes(body.button)) && (body.clickCount === undefined || [1, 2].includes(body.clickCount))
+    : body.type === "move" ? coordinates
+    : body.type === "wheel" ? numberIn(body.deltaY, -2000, 2000) && ((body.x === undefined && body.y === undefined) || coordinates)
+    : body.type === "key" ? typeof body.key === "string" && /^(?:(?:Control|Meta|Shift|Alt)\+)*(?:[a-zA-Z0-9]|Enter|Tab|Escape|Backspace|Delete|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Home|End|PageUp|PageDown|Space)$/.test(body.key)
+    : body.type === "text" ? typeof body.text === "string" && body.text.length <= 4000
+    : body.type === "navigate" ? typeof body.url === "string" && body.url.length <= 2048 && /^https?:\/\//i.test(body.url)
+    : body.type === "blur" || body.type === "screenshot";
+  if (!valid) throw new HttpError(400, "Invalid browser input.");
+  try { await recorder.input(session.id, body); res.status(204).end(); }
+  catch { throw new HttpError(409, "The browser could not complete this interaction. Check the screen and try again."); }
+}
+app.post("/api/record/:id/input", (req, res) => recordingInput(req, res));
+app.post("/api/screen/:id/interact", (req, res) => recordingInput(req, res, true));
+
+// Preserve the screen API while restricting frames to the recording owner.
+app.get("/api/screen/:id/events", (req, res) => {
+  const session = requireRecording(req);
+  if (session.startedBy !== requireAuth(req).username) throw new HttpError(404, "Recording not found.");
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
+  res.write(": connected\n\n");
+  const clearFrames = streamScreenFrames(session.id, res);
+  const ping = setInterval(() => res.write(": ping\n\n"), 15000);
+  req.on("close", () => { clearFrames(); clearInterval(ping); });
+});
+
+function streamScreenFrames(id: string, res: Response) {
+  let sentAt = 0;
+  const timer = setInterval(() => {
+    if (recorder.get(id)?.status !== "recording") { clearInterval(timer); return; }
+    const frame = screencast.latest(id);
+    if (frame && frame.at !== sentAt && !res.writableNeedDrain && !res.destroyed) {
+      sentAt = frame.at;
+      sse(res, "frame", { ...frame, image: frame.data, url: recorder.currentUrl(id) });
+    }
+  }, 120);
+  return () => clearInterval(timer);
+}
 
 app.post("/api/record/:id/stop", async (req, res) => {
   requireRecording(req);
@@ -1593,10 +1724,12 @@ app.get("/api/record/:id/events", (req, res) => {
       res.end();
     }
   );
+  const clearFrames = streamScreenFrames(session.id, res);
   const ping = setInterval(() => res.write(": ping\n\n"), 15000);
   req.on("close", () => {
     clearInterval(ping);
     unsubscribe();
+    clearFrames();
   });
 });
 
