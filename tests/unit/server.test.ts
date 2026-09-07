@@ -260,3 +260,50 @@ test("departments are attached to accounts and normalized so a team is spelled o
     fs.rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test("renaming a department moves every member of it at once", { timeout: 20000 }, async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "mmqa-deptflow-"));
+  const server = launch(workspace);
+  try {
+    const url = await server.ready;
+    const send = (method: string, route: string, body?: unknown, cookie?: string) => fetch(`${url}${route}`, {
+      method,
+      headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    });
+
+    // The first account is created before Manage users exists, so setup must
+    // be able to record a department too.
+    const setup = await send("POST", "/api/auth/setup", { username: "owner", password: "safe-test-password", department: "QA" });
+    const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+    assert.equal((await setup.json()).user.department, "QA");
+
+    await send("POST", "/api/users", { username: "second", password: "safe-test-password", department: "QA" }, cookie);
+    await send("POST", "/api/users", { username: "third", password: "safe-test-password", department: "Product" }, cookie);
+
+    // Renaming has to move everyone; editing one at a time is how a workspace
+    // ends up with two spellings of the same team.
+    const renamed = await send("PUT", "/api/departments", { from: "QA", to: "Quality Assurance" }, cookie);
+    assert.equal(renamed.status, 200);
+    assert.equal((await renamed.json()).moved, 2);
+
+    const after = await (await send("GET", "/api/users", undefined, cookie)).json();
+    const departments = after.map((u: { department?: string }) => u.department).sort();
+    assert.deepEqual(departments, ["Product", "Quality Assurance", "Quality Assurance"]);
+
+    // Clearing a department leaves the accounts intact.
+    const cleared = await send("PUT", "/api/departments", { from: "Quality Assurance", to: "" }, cookie);
+    assert.equal((await cleared.json()).moved, 2);
+    assert.deepEqual(await (await send("GET", "/api/departments", undefined, cookie)).json(), ["Product"]);
+    assert.equal((await (await send("GET", "/api/users", undefined, cookie)).json()).length, 3);
+  } finally {
+    if (server.process.exitCode === null) {
+      const exited = once(server.process, "exit");
+      server.process.kill();
+      await exited;
+    }
+    assert.equal(path.dirname(path.resolve(workspace)), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(workspace).startsWith("mmqa-deptflow-"));
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});

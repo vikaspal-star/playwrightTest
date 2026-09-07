@@ -149,6 +149,29 @@ export function listDepartments(): string[] {
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * Rename a department across every account that uses it. Without this a
+ * rename means editing each member, which is exactly how "QA" and "Quality"
+ * end up coexisting.
+ * Returns how many accounts moved.
+ */
+export function renameDepartment(from: string, to: string | null): number {
+  const source = normalizeDepartment(from);
+  if (!source) throw new ValidationError("Choose a department to rename.");
+  const target = to === null ? undefined : normalizeDepartment(to);
+
+  const users = loadUsers();
+  let moved = 0;
+  for (const user of users) {
+    if (!user.department || user.department.toLowerCase() !== source.toLowerCase()) continue;
+    if (target) user.department = target;
+    else delete user.department;
+    moved++;
+  }
+  if (moved) saveUsers(users);
+  return moved;
+}
+
 export function hasAnyUser(): boolean {
   return loadUsers().length > 0;
 }

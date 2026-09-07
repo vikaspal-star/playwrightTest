@@ -43,6 +43,7 @@
       <form id="setup-form">
         <label>Username<input id="setup-username" autocomplete="username" required></label>
         <label>Password<input id="setup-password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <label>Department <span class="label-optional">optional</span><input id="setup-department" placeholder="e.g. QA" autocomplete="off" maxlength="60"></label>
         <div id="setup-error" class="auth-error" hidden></div>
         <button class="btn btn-primary btn-block" type="submit">Create admin account</button>
       </form>
@@ -82,6 +83,7 @@
       </section>
       <section class="members-panel" aria-labelledby="members-title">
         <div class="members-heading"><div class="users-section-heading"><h3 id="members-title">Workspace members <span id="users-count" class="members-count">0</span></h3><p>People who can access this workspace.</p></div><button id="btn-refresh-users" class="btn-icon" aria-label="Refresh members" title="Refresh members"><svg class="icon icon-small" aria-hidden="true"><use href="brand/icons.svg#refresh"/></svg></button></div>
+        <div id="department-strip" class="department-strip" aria-label="Departments"></div>
         <div class="members-search"><svg class="icon icon-small" aria-hidden="true"><use href="brand/icons.svg#search"/></svg><input id="users-search" type="search" placeholder="Search by name, role or department…" aria-label="Search members" autocomplete="off"></div>
         <p id="users-list-message" class="members-message" role="status" hidden></p>
         <ul id="users-list" class="users-list" aria-label="Workspace members"></ul>
@@ -343,6 +345,10 @@
         <section class="pane report-pane">
           <div class="pane-head"><h2>By project</h2></div>
           <div id="report-projects" class="report-table-wrap"></div>
+        </section>
+        <section class="pane report-pane">
+          <div class="pane-head"><h2>By department</h2></div>
+          <div id="report-departments" class="report-table-wrap"></div>
         </section>
         <section class="pane report-pane">
           <div class="pane-head"><h2>By user</h2></div>

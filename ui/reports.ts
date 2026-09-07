@@ -46,6 +46,7 @@ export interface SubjectStats {
 
 export interface UserStats {
   username: string;
+  department?: string;
   runs: number;
   finished: number;
   running: number;
@@ -79,6 +80,18 @@ export interface ProjectStats {
   lastStatus?: string;
 }
 
+export interface DepartmentStats {
+  department: string;
+  members: number;
+  runs: number;
+  passed: number;
+  failed: number;
+  passRate: number | null;
+  stepsExecuted: number;
+  avgDurationMs: number;
+  lastRunAt?: string;
+}
+
 export interface ReportSummary {
   days: number;
   generatedAt: string;
@@ -94,6 +107,7 @@ export interface ReportSummary {
   perTest: SubjectStats[];
   perSuite: SubjectStats[];
   perUser: UserStats[];
+  perDepartment: DepartmentStats[];
   perProject: ProjectStats[];
   dailyTrend: { date: string; passed: number; failed: number }[];
   recentFailures: {
@@ -256,10 +270,43 @@ function statsPerProject(
   );
 }
 
+/** Roll the per-user numbers up to the teams those people belong to. */
+function statsPerDepartment(users: UserStats[]): DepartmentStats[] {
+  const byDepartment = new Map<string, UserStats[]>();
+  for (const user of users) {
+    const key = user.department || "No department";
+    if (!byDepartment.has(key)) byDepartment.set(key, []);
+    byDepartment.get(key)!.push(user);
+  }
+
+  const out: DepartmentStats[] = [];
+  for (const [department, members] of byDepartment) {
+    const finished = members.reduce((sum, m) => sum + m.finished, 0);
+    const passed = members.reduce((sum, m) => sum + m.passed, 0);
+    const withDuration = members.filter(m => m.avgDurationMs > 0);
+    const newest = members.map(m => m.lastRunAt).filter(Boolean).sort().pop();
+    out.push({
+      department,
+      members: members.length,
+      runs: members.reduce((sum, m) => sum + m.runs, 0),
+      passed,
+      failed: members.reduce((sum, m) => sum + m.failed, 0),
+      passRate: finished ? Math.round((passed / finished) * 100) : null,
+      stepsExecuted: members.reduce((sum, m) => sum + m.stepsExecuted, 0),
+      avgDurationMs: withDuration.length
+        ? Math.round(withDuration.reduce((sum, m) => sum + m.avgDurationMs, 0) / withDuration.length)
+        : 0,
+      lastRunAt: newest
+    });
+  }
+  return out.sort((a, b) => b.runs - a.runs || a.department.localeCompare(b.department));
+}
+
 export function buildReport(
   allRuns: RunLike[],
   days: number,
   folderOf: Map<string, string> = new Map(),
+  departmentOf: Map<string, string> = new Map(),
   allTestFiles: string[] = []
 ): ReportSummary {
   const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -332,8 +379,9 @@ export function buildReport(
     },
     perTest: statsFor(runs, "test"),
     perSuite: statsFor(runs, "suite"),
-    perUser: statsPerUser(runs),
+    perUser: statsPerUser(runs).map(u => ({ ...u, department: departmentOf.get(u.username) })),
     perProject: statsPerProject(runs, folderOf, allTestFiles),
+    perDepartment: statsPerDepartment(statsPerUser(runs).map(u => ({ ...u, department: departmentOf.get(u.username) }))),
     dailyTrend: [...trendMap.entries()].map(([date, v]) => ({ date, ...v })),
     recentFailures,
     topFailingSteps: [...failureByAction.entries()]

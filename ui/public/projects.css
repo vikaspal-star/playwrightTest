@@ -190,3 +190,41 @@
   color: #51617d;
   border: 1px solid #e1e8f2;
 }
+
+/* Departments as a strip above the member list: every team, its size, and a
+   rename that moves everyone rather than one person at a time. */
+.department-strip { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 0 12px; }
+
+.dept-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #e1e8f2;
+  background: #f6f8fc;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.dept-chip.active { border-color: var(--accent); background: var(--accent-soft); }
+
+.dept-chip-name {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 5px 4px 5px 11px;
+  color: #51617d;
+}
+.dept-chip.active .dept-chip-name { color: var(--accent); font-weight: 600; }
+
+.dept-chip-count { font-weight: 600; opacity: .75; }
+
+.dept-chip-edit {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 5px 9px 5px 5px;
+  color: var(--muted);
+}
+.dept-chip-edit:hover { color: var(--accent); }
+
+.label-optional { font-size: 11px; color: var(--muted); font-weight: 400; }

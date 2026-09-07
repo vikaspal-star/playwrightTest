@@ -34,6 +34,7 @@ import {
   destroySession,
   hasAnyUser,
   listDepartments,
+  renameDepartment,
   listUsers,
   toPublicUser,
   updateUser,
@@ -961,8 +962,14 @@ app.get("/api/auth/status", (req, res) => {
 
 app.post("/api/auth/setup", (req, res) => {
   if (hasAnyUser()) throw new HttpError(409, "Setup already completed. Log in instead.");
-  const body = (req.body ?? {}) as { username?: unknown; password?: unknown };
-  const user = createUser(String(body.username ?? ""), String(body.password ?? ""), "site_admin");
+  const body = (req.body ?? {}) as { username?: unknown; password?: unknown; department?: unknown };
+  const user = createUser(
+    String(body.username ?? ""),
+    String(body.password ?? ""),
+    "site_admin",
+    undefined,
+    typeof body.department === "string" ? body.department : undefined
+  );
   createSession(user.id, res);
   res.status(201).json({ user });
 });
@@ -1065,6 +1072,16 @@ app.delete("/api/users/:id", (req, res) => {
 app.get("/api/departments", (req, res) => {
   requireAuth(req);
   res.json(listDepartments());
+});
+
+// Rename a department everywhere it is used, or clear it by sending an empty
+// name. Site admin only: it edits other people's accounts.
+app.put("/api/departments", (req, res) => {
+  requireSiteAdmin(req);
+  const body = (req.body ?? {}) as { from?: unknown; to?: unknown };
+  const to = typeof body.to === "string" && body.to.trim() ? String(body.to) : null;
+  const moved = renameDepartment(String(body.from ?? ""), to);
+  res.json({ moved, departments: listDepartments() });
 });
 
 // The feature catalog, so the site admin UI can render grant checkboxes.
@@ -1540,6 +1557,7 @@ app.get("/api/reports/summary", (req, res) => {
     new Map(
       Object.entries(projects.assignments).filter(([file]) => canReadTest(file, user)).map(([file, assignment]) => [file, projects.projects.find(project => project.id === assignment.projectId)?.name || ""])
     ),
+    new Map(listUsers().flatMap(u => (u.department ? [[u.username, u.department] as [string, string]] : []))),
     fs.existsSync(JSON_DIR)
       ? fs.readdirSync(JSON_DIR).filter(f => f.toLowerCase().endsWith(".json") && canReadTest(f, user))
       : []

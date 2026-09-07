@@ -28,6 +28,7 @@
     suiteDirty: false,
     user: null,
     allUsers: [],
+    departmentFilter: null,
     recording: null,
     recordSource: null,
     featureCatalog: [],
@@ -1803,6 +1804,7 @@
     }
 
     renderProjectTable($("report-projects"), r.perProject || []);
+    renderDepartmentTable($("report-departments"), r.perDepartment || []);
     renderUserTable($("report-users"), r.perUser || []);
     renderReportTable($("report-tests"), r.perTest, "test");
     renderReportTable($("report-suites"), r.perSuite, "suite");
@@ -1874,6 +1876,37 @@
     container.append(table);
   }
 
+  function renderDepartmentTable(container, rows) {
+    container.replaceChildren();
+    if (!rows.length) {
+      container.append(el("div", { class: "muted", text: "No runs to group yet. Assign departments in Manage users." }));
+      return;
+    }
+    const table = el("table", { class: "report-table" },
+      el("thead", {}, el("tr", {},
+        el("th", { text: "Department" }), el("th", { text: "People" }), el("th", { text: "Runs" }),
+        el("th", { text: "Passed" }), el("th", { text: "Failed" }), el("th", { text: "Pass rate" }),
+        el("th", { text: "Steps" }), el("th", { text: "Avg" }), el("th", { text: "Last run" })
+      ))
+    );
+    const body = el("tbody");
+    for (const row of rows) {
+      body.append(el("tr", {},
+        el("td", {}, el("span", { class: "u-department", text: row.department })),
+        el("td", { text: String(row.members) }),
+        el("td", { text: String(row.runs) }),
+        el("td", { text: String(row.passed) }),
+        el("td", { text: String(row.failed) }),
+        el("td", {}, rateCell(row.passRate)),
+        el("td", { text: String(row.stepsExecuted) }),
+        el("td", { text: fmtMs(row.avgDurationMs) || "—" }),
+        el("td", { text: row.lastRunAt ? fmtRelative(row.lastRunAt) : "—", title: row.lastRunAt ? fmtTime(row.lastRunAt) : "" })
+      ));
+    }
+    table.append(body);
+    container.append(table);
+  }
+
   function renderUserTable(container, rows) {
     container.replaceChildren();
     if (!rows.length) {
@@ -1882,7 +1915,7 @@
     }
     const table = el("table", { class: "report-table" },
       el("thead", {}, el("tr", {},
-        el("th", { text: "User" }), el("th", { text: "Runs" }), el("th", { text: "Tests" }),
+        el("th", { text: "User" }), el("th", { text: "Department" }), el("th", { text: "Runs" }), el("th", { text: "Tests" }),
         el("th", { text: "Suites" }), el("th", { text: "Passed" }), el("th", { text: "Failed" }),
         el("th", { text: "Pass rate" }), el("th", { text: "Steps" }), el("th", { text: "Avg" }), el("th", { text: "Last run" })
       ))
@@ -1894,6 +1927,7 @@
           el("span", { class: "user-avatar", text: (row.username[0] || "?").toUpperCase() }),
           row.username
         )),
+        el("td", {}, row.department ? el("span", { class: "u-department", text: row.department }) : el("span", { class: "muted", text: "—" })),
         el("td", { text: String(row.runs) + (row.running ? ` (${row.running} running)` : "") }),
         el("td", { text: String(row.testRuns) }),
         el("td", { text: String(row.suiteRuns) }),
@@ -2385,7 +2419,8 @@
       try {
         await authApi("/api/auth/setup", {
           username: $("setup-username").value,
-          password: $("setup-password").value
+          password: $("setup-password").value,
+          department: $("setup-department").value
         });
         location.reload();
       } catch (ex) {
@@ -2578,9 +2613,62 @@
     }
   }
 
+  // Departments are derived from the members themselves, so the strip cannot
+  // drift out of step with who is actually in each team.
+  function drawDepartmentStrip() {
+    const strip = $("department-strip");
+    if (!strip) return;
+    const counts = new Map();
+    let unassigned = 0;
+    for (const user of managedUsers) {
+      if (!user.department) { unassigned++; continue; }
+      counts.set(user.department, (counts.get(user.department) || 0) + 1);
+    }
+
+    strip.replaceChildren();
+    if (!counts.size && !unassigned) return;
+
+    const chip = (label, count, department) => el("span", { class: `dept-chip${state.departmentFilter === department ? " active" : ""}` },
+      el("button", {
+        class: "dept-chip-name",
+        title: department ? `Show only ${department}` : "Show members with no department",
+        onclick: () => {
+          state.departmentFilter = state.departmentFilter === department ? null : department;
+          drawManagedUsers();
+        }
+      }, `${label} `, el("span", { class: "dept-chip-count", text: String(count) })),
+      department && state.user.role === "site_admin"
+        ? el("button", { class: "dept-chip-edit", title: `Rename ${department} everywhere`, "aria-label": `Rename ${department}`, onclick: () => renameDepartment(department, count) }, "✎")
+        : null
+    );
+
+    for (const [name, count] of [...counts].sort((a, b) => a[0].localeCompare(b[0]))) {
+      strip.append(chip(name, count, name));
+    }
+    if (unassigned) strip.append(chip("No department", unassigned, ""));
+  }
+
+  async function renameDepartment(from, count) {
+    const to = await promptDialog(
+      `Rename "${from}" for all ${count} member${count === 1 ? "" : "s"}. Leave empty to clear it from them.`,
+      { title: "Rename department", okLabel: "Rename", defaultValue: from }
+    );
+    if (to === null) return;
+    try {
+      const result = await api("/api/departments", { method: "PUT", body: JSON.stringify({ from, to }) });
+      await renderUsersList();
+      toast(to.trim() ? `Moved ${result.moved} to ${to.trim()}` : `Cleared the department for ${result.moved}`, "ok");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  }
+
   function drawManagedUsers() {
     const query = $("users-search").value.trim().toLowerCase();
-    const users = managedUsers.filter(user => `${user.username} ${ROLE_LABELS[user.role] || user.role} ${user.department || ""}`.toLowerCase().includes(query));
+    const users = managedUsers
+      .filter(user => state.departmentFilter === null || state.departmentFilter === undefined || (user.department || "") === state.departmentFilter)
+      .filter(user => `${user.username} ${ROLE_LABELS[user.role] || user.role} ${user.department || ""}`.toLowerCase().includes(query));
+    drawDepartmentStrip();
     $("users-count").textContent = managedUsers.length;
     $("users-list-message").hidden = users.length > 0;
     $("users-list-message").textContent = query ? "No matching members. Try another name or role." : "No members to show.";
