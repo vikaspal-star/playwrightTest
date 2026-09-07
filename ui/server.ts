@@ -57,6 +57,7 @@ import * as screencast from "./agent/screencast";
 import { AnalysisResult, analyzeFailure, analyzeRun, analyzeAdaptation, isConfigured as aiConfigured } from "./anthropic";
 import * as aiUsage from "./aiUsage";
 import { agentTestingRouter } from "./agentTestingRoutes";
+import { listRequirements, saveRequirements, newRequirement, requirementInput } from "./requirements";
 import { ROOT, WORKSPACE, JSON_DIR, SUITES_DIR, RUNS_DIR, DATA_DIR, HOST, PORT, MAX_ACTIVE_RUNS, RUN_TIMEOUT_MS } from "./config";
 import { readJson, writeJson, acquireWorkspaceLock } from "./storage";
 import { validateTest, ValidationError } from "../src/validation";
@@ -145,6 +146,7 @@ interface SuiteFile {
   description: string;
   continueOnFailure: boolean;
   tests: string[];
+  projectId?: string;
 }
 
 const activeRuns = new Map<string, ActiveRun>();
@@ -408,7 +410,7 @@ function readSuite(file: string): SuiteFile {
   const p = suitePath(file);
   if (!fs.existsSync(p)) throw new HttpError(404, `Suite not found: ${file}`);
 
-  let parsed: { name?: unknown; description?: unknown; tests?: unknown; continueOnFailure?: unknown };
+  let parsed: { name?: unknown; description?: unknown; tests?: unknown; continueOnFailure?: unknown; projectId?: unknown };
   try {
     parsed = JSON.parse(fs.readFileSync(p, "utf-8"));
   } catch {
@@ -422,6 +424,7 @@ function readSuite(file: string): SuiteFile {
     name: typeof parsed.name === "string" ? parsed.name : "",
     description: typeof parsed.description === "string" ? parsed.description : "",
     continueOnFailure: Boolean(parsed.continueOnFailure),
+    projectId: typeof parsed.projectId === "string" ? parsed.projectId : undefined,
     tests: (parsed.tests as unknown[]).filter((t): t is string => typeof t === "string")
   };
 }
@@ -433,7 +436,7 @@ function writeSuite(file: string, data: Record<string, unknown>): void {
 
 function validateSuiteBody(body: unknown, user: PublicUser): Record<string, unknown> {
   if (!body || typeof body !== "object") throw new HttpError(400, "Body must be an object");
-  const b = body as { name?: unknown; description?: unknown; tests?: unknown; continueOnFailure?: unknown };
+  const b = body as { name?: unknown; description?: unknown; tests?: unknown; continueOnFailure?: unknown; projectId?: unknown };
   if (!Array.isArray(b.tests)) throw new HttpError(400, "tests must be an array");
 
   if (b.tests.length > 200) throw new HttpError(400, "A suite can contain at most 200 tests.");
@@ -446,6 +449,10 @@ function validateSuiteBody(body: unknown, user: PublicUser): Record<string, unkn
   });
 
   const out: Record<string, unknown> = {};
+  if (b.projectId !== undefined && b.projectId !== "") {
+    if (typeof b.projectId !== "string" || !projectStore().projects.some(p => p.id === b.projectId)) throw new HttpError(400, "Choose an existing project for this suite.");
+    out.projectId = b.projectId;
+  }
   if (typeof b.name === "string" && b.name.trim()) out.name = b.name.trim();
   if (typeof b.description === "string" && b.description.trim()) out.description = b.description.trim();
   out.continueOnFailure = Boolean(b.continueOnFailure);
@@ -1115,6 +1122,48 @@ app.get("/api/projects", (req, res) => {
   const store = projectStore();
   res.json({ ...store, assignments: Object.fromEntries(Object.entries(store.assignments).filter(([file]) => fs.existsSync(testPath(file)) && resolveAccess(getTestMeta(file), user) !== null)) });
 });
+
+// Requirements are shared project records. Test links always respect test access.
+app.get("/api/projects/:id/requirements", (req, res) => {
+  const user = requireAuth(req);
+  const store = projectStore();
+  if (!store.projects.some(p => p.id === req.params.id)) throw new HttpError(404, "Project not found.");
+  const records = listRequirements().filter(r => r.projectId === req.params.id).map(r => ({ ...r, tests: r.tests.filter(file => canReadTest(file, user) && store.assignments[file]?.projectId === r.projectId) }));
+  res.json(records);
+});
+app.post("/api/projects/:id/requirements", (req, res) => {
+  const user = requireFeature(req, "folders.manage");
+  const store = projectStore();
+  if (!store.projects.some(p => p.id === req.params.id)) throw new HttpError(404, "Project not found.");
+  const row = newRequirement(String(req.params.id), req.body, user.username);
+  if (row.tests.some(file => !canReadTest(file, user) || store.assignments[file]?.projectId !== row.projectId)) throw new HttpError(400, "Link only available tests in this project.");
+  const records = listRequirements();
+  if (records.filter(r => r.projectId === row.projectId).length >= 1000) throw new HttpError(409, "This project has reached its 1,000 requirement limit.");
+  records.push(row); saveRequirements(records); res.status(201).json(row);
+});
+app.put("/api/projects/:id/requirements/:requirementId", (req, res) => {
+  const user = requireFeature(req, "folders.manage");
+  const store = projectStore(), records = listRequirements();
+  if (!store.projects.some(p => p.id === req.params.id)) throw new HttpError(404, "Project not found.");
+  const row = records.find(r => r.projectId === req.params.id && r.id === req.params.requirementId);
+  if (!row) throw new HttpError(404, "Requirement not found.");
+  if (req.body?.revision !== row.revision) throw new HttpError(409, "This requirement changed. Reopen it before saving.");
+  const input = requirementInput(req.body);
+  if (input.tests.some(file => !canReadTest(file, user) || store.assignments[file]?.projectId !== row.projectId)) throw new HttpError(400, "Link only available tests in this project.");
+  // Preserve links hidden from this editor; editing visible links must not revoke others.
+  const hidden = row.tests.filter(file => !canReadTest(file, user) && store.assignments[file]?.projectId === row.projectId);
+  const next = { ...newRequirement(row.projectId, input, user.username), id: row.id, tests: [...new Set([...hidden, ...input.tests])] };
+  saveRequirements(records.map(r => r.id === row.id ? next : r));
+  res.json({ ...next, tests: input.tests });
+});
+app.delete("/api/projects/:id/requirements/:requirementId", (req, res) => {
+  requireFeature(req, "folders.manage");
+  const records = listRequirements();
+  const row = records.find(r => r.projectId === req.params.id && r.id === req.params.requirementId);
+  if (!row) throw new HttpError(404, "Requirement not found.");
+  if (req.body?.revision !== row.revision) throw new HttpError(409, "This requirement changed. Reopen it before deleting.");
+  saveRequirements(records.filter(r => r.id !== row.id)); res.status(204).end();
+});
 app.post("/api/projects", (req, res) => {
   requireFeature(req, "folders.manage");
   const store = projectStore();
@@ -1399,6 +1448,8 @@ app.delete("/api/tests/:file", (req, res) => {
     saveRun(record);
   }
   fs.unlinkSync(testPath(file));
+  const requirements = listRequirements();
+  if (requirements.some(r => r.tests.includes(file))) saveRequirements(requirements.map(r => r.tests.includes(file) ? { ...newRequirement(r.projectId, { ...r, tests: r.tests.filter(test => test !== file) }, user.username), id: r.id } : r));
   // Retain sharing metadata so deleting a test cannot expose its historical runs.
   res.status(204).end();
 });
@@ -1420,16 +1471,19 @@ app.get("/api/suites", (req, res) => {
     .filter(f => f.toLowerCase().endsWith(".json"))
     .sort();
   const runs = listRuns(undefined, "suite");
+  const store = projectStore();
 
   res.json(
     files.filter(file => canReadSuite(file, user)).map(file => {
       let name = "";
       let testCount = 0;
+      let projectIds: string[] = [];
       let error: string | undefined;
       try {
         const s = readSuite(file);
         name = s.name;
         testCount = s.tests.length;
+        projectIds = [...new Set([s.projectId, ...s.tests.map(test => store.assignments[test]?.projectId)].filter((id): id is string => Boolean(id)))];
       } catch (e) {
         error = (e as Error).message;
       }
@@ -1438,6 +1492,7 @@ app.get("/api/suites", (req, res) => {
         file,
         name,
         testCount,
+        projectIds,
         error,
         running: isRunning("suite", file),
         lastRun: last
@@ -1456,7 +1511,7 @@ app.get("/api/suites/:file", (req, res) => {
 
 app.post("/api/suites", (req, res) => {
   const user = requireFeature(req, "suites.manage");
-  const body = (req.body ?? {}) as { file?: unknown; name?: unknown; tests?: unknown };
+  const body = (req.body ?? {}) as { file?: unknown; name?: unknown; tests?: unknown; projectId?: unknown };
   const raw = String(body.file ?? "").trim();
   const file = safeFile(raw.toLowerCase().endsWith(".json") ? raw : `${raw}.json`);
   if (fs.existsSync(suitePath(file))) throw new HttpError(409, `${file} already exists`);
@@ -1464,6 +1519,7 @@ app.post("/api/suites", (req, res) => {
   const data = validateSuiteBody({
     name: body.name ?? file.replace(/\.json$/, ""),
     tests: Array.isArray(body.tests) ? body.tests : [],
+    projectId: body.projectId,
     continueOnFailure: false
   }, user);
   writeSuite(file, data);

@@ -2,6 +2,11 @@
 
 ## Workflow
 
+- **Project workspace (September 7):** the project grid is a separate selection screen. Opening a project reveals three counted tabs: **Test cases**, **Requirements**, and **Suites**. The project heading and tabs stay visible; the selected tab has one scrolling content area. A compact project switcher and environment filter replace stacked card rows. The selected project, tab and environment are included in the URL and survive refresh/back navigation.
+- **Requirements** are shared project records with a title, acceptance criteria, Draft/Approved status and linked test cases. The tab shows the saved requirement count, approved count and number linked to accessible tests. `folders.manage` grants create/edit/delete; other signed-in users can read them. Test links retain existing test access checks, and deleting a requirement keeps its test cases. Stale edits are rejected using a revision value. Requirement records are stored in `ui/data/requirements.json` and should be backed up with the workspace.
+- **Project suites** include suites explicitly created in the project and existing suites containing that project's tests. Suites spanning projects appear in each relevant project. Creating an empty suite from this tab preserves its project association; the global Suites area remains available. Existing suite files are not rewritten just to infer membership.
+- **Browse all test cases** remains available from the project selection screen and Overview. Project tabs show totals for the whole project; the environment selector narrows the Test cases list.
+
 - **Projects** replaces Test library. Project cards lead to a single level of Sandbox or Production environments, each with a configurable application URL. The test list is flat and supports the existing search and status filters.
 - **New project** creates a project and its first environment. **Add environment** adds another URL under that project. Environment names can distinguish different sandbox installations.
 - **New test** asks for a name and destination. Filenames are allocated automatically (`new-test.json`, `new-test-2.json`, etc.). A configured environment URL becomes the first navigation step. An explicit filename supplied through the API still returns a conflict rather than overwriting a test.

@@ -16,6 +16,11 @@
     assignments: {},
     projectId: "",
     environmentId: "",
+    projectTab: "tests",
+    showAllTests: false,
+    requirements: {},
+    requirementLoading: new Set(),
+    requirementErrors: {},
     file: null,
     test: null,
     dirty: false,
@@ -263,6 +268,7 @@
       const endpoint = !project ? "/api/projects" : `/api/projects/${project.id}/environments${existing ? `/${existing.id}` : ""}`;
       const result = await api(endpoint, { method: existing ? "PUT" : "POST", body: JSON.stringify(project ? environment : { name: projectInput.value, environment }) });
       state.projectId = project?.id || result.id; state.environmentId = project ? result.id : result.environments[0].id;
+      state.projectTab = "tests"; state.showAllTests = false;
       await loadFolders(); switchTab("tests"); toast(existing ? "Environment updated" : "Project environment ready", "ok");
     });
   }
@@ -295,8 +301,9 @@
     if (state.recording || state.recordStarting) { toast("Add or discard your recording before leaving the editor."); return; }
     if (tab === "reports") { openReports(); return; }
     activateView(tab, tab === "overview" ? "empty" : `${tab}-panel`);
-    location.hash = `view:${tab}`;
+    location.hash = tab === "tests" ? projectRoute() : `view:${tab}`;
     if (tab === "overview") renderOverview();
+    if (tab === "tests") renderTestList();
     if (tab === "overview") void loadOverviewCounts();
     if (tab === "settings") void renderAiUsage($("settings-telemetry"), Number($("telemetry-days").value));
     if (tab === "agents") void window.AgentTesting.open({ api, el, can, toast, confirmDialog, projects: state.projects });
@@ -353,9 +360,10 @@
     const tests = state.tests;
     const stats = [["Projects", state.overviewCounts?.projects ?? state.projects.length, "Organized workspaces", "projects"], ["Users", state.overviewCounts?.users ?? "—", "Workspace accounts", "users"], ["Test cases", tests.length, "Across your workspace", "all"], ["Passed latest run", tests.filter(t => testStatus(t) === "passed").length, "Latest standalone results", "passed"], ["Need attention", tests.filter(t => t.error || testStatus(t) === "failed").length, "Failed or invalid tests", "attention"], ["Never run", tests.filter(t => !t.lastRun && !t.running).length, "Ready for a first run", "none"]];
     $("overview-stats").replaceChildren(...stats.map(([label, value, caption, filter]) => el("button", { class: `overview-stat stat-${filter}`, onclick: () => {
-      if (filter === "projects") { state.projectId = ""; state.environmentId = ""; renderTestList(); switchTab("tests"); return; }
+      if (filter === "projects") { state.projectId = ""; state.environmentId = ""; state.showAllTests = false; renderTestList(); switchTab("tests"); return; }
       if (filter === "users") { if (can("users.manage")) $("btn-manage-users").click(); else toast("Workspace account total. User management requires permission."); return; }
       state.statusFilter = filter;
+      state.projectId = ""; state.environmentId = ""; state.showAllTests = true; state.projectTab = "tests";
       state.search = "";
       $("test-search").value = "";
       revealMatches();
@@ -419,6 +427,20 @@
   }
 
   function selectedProject() { return state.projects.find(p => p.id === state.projectId); }
+  function projectRoute() { return state.projectId ? `project:${encodeURIComponent(state.projectId)}/${state.projectTab}/${encodeURIComponent(state.environmentId)}` : state.showAllTests ? "view:all-tests" : "view:tests"; }
+  function openProject(id, tab = "tests", environmentId = "") {
+    const project = state.projects.find(p => p.id === id);
+    state.projectId = project?.id || ""; state.projectTab = ["tests", "requirements", "suites"].includes(tab) ? tab : "tests";
+    state.environmentId = project?.environments.some(e => e.id === environmentId) ? environmentId : "";
+    state.showAllTests = false;
+    state.search = ""; state.statusFilter = "all"; $("test-search").value = "";
+    renderTestList(); $("project-scroll").scrollTop = 0; location.hash = projectRoute();
+    if (project) void loadRequirements(project.id);
+  }
+  function setProjectTab(tab) {
+    state.projectTab = tab; renderTestList(); $("project-scroll").scrollTop = 0; location.hash = projectRoute();
+    if (tab === "requirements") void loadRequirements(state.projectId);
+  }
   function assignmentFor(file) { return state.assignments[file] || {}; }
   function projectScope(test) {
     const assignment = assignmentFor(test.file);
@@ -426,6 +448,23 @@
   }
   function renderTestList() {
     const project = selectedProject();
+    const detail = Boolean(project || state.showAllTests);
+    $("project-page-title").textContent = project?.name || (state.showAllTests ? "All test cases" : "Projects");
+    $("library-count").hidden = detail;
+    $("project-eyebrow").textContent = detail ? "PROJECT WORKSPACE" : "BUILD & ORGANIZE";
+    $("project-description").textContent = project ? `${project.environments.length} environments · Test cases, requirements, and suites in one place.` : state.showAllTests ? "Test cases across all your projects." : "Choose a project to see its test cases, requirements, and suites.";
+    $("project-grid").hidden = detail;
+    $("project-tabs").hidden = !project;
+    $("btn-new-folder").hidden = detail || !can("folders.manage");
+    $("btn-new").hidden = !can("tests.create") || (detail && state.projectTab !== "tests");
+    $("btn-import").hidden = !can("tests.create") || (detail && state.projectTab !== "tests");
+    $("btn-new-requirement").hidden = !project || state.projectTab !== "requirements" || !can("folders.manage");
+    $("btn-project-suite").hidden = !project || state.projectTab !== "suites" || !can("suites.manage");
+    for (const tab of document.querySelectorAll("[data-project-tab]")) {
+      const active = tab.dataset.projectTab === state.projectTab;
+      tab.setAttribute("aria-selected", String(active)); tab.tabIndex = active ? 0 : -1;
+      $(`project-${tab.dataset.projectTab}-content`).hidden = !detail || !active;
+    }
     const scope = state.tests.filter(projectScope);
     const visible = visibleTests().filter(projectScope);
     $("nav-test-count").textContent = state.projects.length;
@@ -434,21 +473,27 @@
       const tests = state.tests.filter(t => assignmentFor(t.file).projectId === p.id);
       const failures = tests.filter(t => testStatus(t) === "failed").length;
       return el("button", { class: `project-card${p.id === state.projectId ? " selected" : ""}`, "aria-label": `Open project ${p.name}`, "aria-pressed": String(p.id === state.projectId), onclick: () => {
-        state.projectId = p.id; state.environmentId = ""; renderTestList();
+        openProject(p.id);
       } }, el("span", { class: "project-card-icon", "aria-hidden": "true", text: p.name.slice(0, 2).toUpperCase() }),
       el("strong", { text: p.name }), el("span", { class: "muted", text: `${p.environments.length} environments · ${tests.length} tests` }),
       el("span", { class: failures ? "project-attention" : "project-ready", text: failures ? `${failures} need attention` : tests.length ? "Ready to explore →" : "Add your first environment →" }));
     }));
     const heading = $("project-context");
-    heading.replaceChildren(el("div", {}, el("span", { class: "eyebrow", text: project ? "PROJECT / ENVIRONMENTS" : "ACROSS YOUR WORKSPACE" }), el("h2", { text: project?.name || "All tests" })),
-      el("div", { class: "page-actions" }, project ? el("button", { class: "btn", text: "All projects", onclick: () => { state.projectId = ""; state.environmentId = ""; renderTestList(); } }) : null,
-        project && can("folders.manage") ? el("button", { class: "btn", text: "+ Add environment", onclick: () => environmentForm(project) }) : null));
-    $("environment-list").replaceChildren(...(project ? [el("button", { class: `environment-card${!state.environmentId ? " selected" : ""}`, "aria-pressed": String(!state.environmentId), onclick: () => { state.environmentId = ""; renderTestList(); } }, el("strong", { text: "All environments" }), el("span", { text: `${state.tests.filter(t => assignmentFor(t.file).projectId === project.id).length} tests` })), ...project.environments.map(environment =>
-      el("div", { class: `environment-card${state.environmentId === environment.id ? " selected" : ""}` },
-        el("button", { class: "environment-select", "aria-label": `Open environment ${environment.name}`, "aria-pressed": String(state.environmentId === environment.id), onclick: () => { state.environmentId = environment.id; renderTestList(); } },
-          el("strong", { text: environment.name }), el("span", { class: `environment-type ${environment.type}`, text: environment.type }), el("span", { class: "environment-url", text: environment.url || "Application URL not set" })),
-        can("folders.manage") ? el("button", { class: "btn-link", "aria-label": `Settings for ${environment.name}`, text: "Settings", onclick: () => environmentForm(project, environment) }) : null))] : []));
+    heading.replaceChildren();
+    if (detail) heading.append(el("button", { class: "btn-link", text: "← All projects", onclick: () => openProject("") }));
+    else heading.append(el("span", { class: "muted", text: `${state.projects.length} projects` }), el("button", { class: "btn-link", text: "Browse all test cases", onclick: () => { state.projectId = ""; state.environmentId = ""; state.projectTab = "tests"; state.showAllTests = true; renderTestList(); location.hash = projectRoute(); } }));
+    if (project) {
+      const picker = el("select", { "aria-label": "Switch project", onchange: event => openProject(event.target.value) }, ...state.projects.map(p => el("option", { value: p.id, text: p.name })));
+      picker.value = project.id; heading.append(picker);
+    }
     $("environment-list").hidden = !project;
+    if (project) {
+      const picker = el("select", { "aria-label": "Filter by environment", onchange: event => { state.environmentId = event.target.value; renderTestList(); location.hash = projectRoute(); } }, el("option", { value: "", text: "All environments" }), ...project.environments.map(e => el("option", { value: e.id, text: `${e.name} · ${e.type}` })));
+      picker.value = state.environmentId;
+      const environment = project.environments.find(e => e.id === state.environmentId);
+      $("environment-list").replaceChildren(el("label", {}, "Environment", picker), environment?.url ? el("span", { class: "project-endpoint", text: environment.url, title: environment.url }) : null,
+        can("folders.manage") ? el("div", { class: "page-actions" }, environment ? el("button", { class: "btn-link", text: "Environment settings", onclick: () => environmentForm(project, environment) }) : null, el("button", { class: "btn-link", text: "+ Add environment", onclick: () => environmentForm(project) })) : null);
+    }
     for (const chip of document.querySelectorAll("#status-filter .chip")) {
       const key = chip.dataset.filter;
       const count = key === "all" ? scope.length : scope.filter(t => testStatus(t) === key).length;
@@ -459,6 +504,71 @@
     if (!visible.length) $("test-tree").append(el("li", { class: "library-empty", text: scope.length ? "No matching tests. Clear the filters to see all tests." : project ? "No tests in this environment yet. Create a test, import JSON, or move an existing test here." : "Create a project to organize your first tests." }));
     $("library-summary").replaceChildren(document.createTextNode(`${visible.length} of ${scope.length} tests`));
     if (state.statusFilter !== "all" || state.search) $("library-summary").append(el("button", { class: "btn-link", text: "Clear filters", onclick: () => { state.statusFilter = "all"; state.search = ""; $("test-search").value = ""; renderTestList(); } }));
+    $("project-tests-count").textContent = state.tests.filter(t => assignmentFor(t.file).projectId === project?.id).length;
+    $("project-requirements-count").textContent = project && state.requirements[project.id] ? state.requirements[project.id].length : "—";
+    renderProjectRequirements(); renderProjectSuites();
+    if (project && !state.requirements[project.id] && !state.requirementLoading.has(project.id) && !state.requirementErrors[project.id]) void loadRequirements(project.id);
+  }
+
+  async function loadRequirements(projectId) {
+    if (!projectId || state.requirementLoading.has(projectId)) return;
+    state.requirementLoading.add(projectId); delete state.requirementErrors[projectId];
+    try { state.requirements[projectId] = await api(`/api/projects/${encodeURIComponent(projectId)}/requirements`); }
+    catch (error) { state.requirementErrors[projectId] = error.message; }
+    finally { state.requirementLoading.delete(projectId); if (state.projectId === projectId) renderTestList(); }
+  }
+
+  function renderProjectRequirements() {
+    const container = $("project-requirements-content"), project = selectedProject();
+    container.replaceChildren();
+    if (!project) return;
+    const rows = state.requirements[project.id];
+    if (state.requirementErrors[project.id]) {
+      container.append(el("p", { role: "alert", class: "agent-error", text: state.requirementErrors[project.id] }), el("button", { class: "btn", text: "Retry requirements", onclick: () => loadRequirements(project.id) })); return;
+    }
+    if (!rows) { container.append(el("p", { class: "muted", text: "Loading requirements…" })); return; }
+    const projectTests = state.tests.filter(t => assignmentFor(t.file).projectId === project.id);
+    const links = row => row.tests.filter(file => projectTests.some(t => t.file === file));
+    const covered = rows.filter(r => links(r).length).length;
+    container.append(el("div", { class: "requirement-summary" }, el("span", {}, el("strong", { text: rows.length }), " requirements"), el("span", {}, el("strong", { text: rows.filter(r => r.status === "approved").length }), " approved"), el("span", {}, el("strong", { text: covered }), " linked to test cases")));
+    const list = el("div", { class: "surface requirement-list", "aria-label": "Project requirements" });
+    const draw = query => {
+      const matches = rows.filter(r => `${r.title} ${r.description}`.toLowerCase().includes(query.trim().toLowerCase()));
+      list.replaceChildren();
+      for (const row of matches) list.append(el("article", { class: "requirement-row" },
+        el("div", { class: "requirement-main" }, el("button", { class: "requirement-title", text: row.title, onclick: () => requirementForm(row) }), el("p", { class: "requirement-description", text: row.description || "No details added yet." }),
+          el("div", { class: "requirement-links" }, links(row).length ? links(row).map(file => el("button", { class: "btn-link", text: projectTests.find(t => t.file === file)?.name || file, onclick: () => openTest(file) })) : el("span", { class: "muted", text: "No linked test cases" }))),
+        el("div", { class: "requirement-state" }, el("span", { class: `badge ${row.status === "approved" ? "passed" : "none"}`, text: row.status }), el("small", { class: "muted", text: `${links(row).length} linked tests` }), can("folders.manage") ? el("button", { class: "btn-link danger-text", "aria-label": `Delete requirement ${row.title}`, text: "Delete", onclick: async () => {
+          if (!await confirmDialog(`Delete the requirement “${row.title}”? Linked test cases will remain available.`, { title: "Delete requirement", okLabel: "Delete requirement", danger: true })) return;
+          try { await api(`/api/projects/${project.id}/requirements/${row.id}`, { method: "DELETE", body: JSON.stringify({ revision: row.revision }) }); await loadRequirements(project.id); toast("Requirement deleted", "ok"); } catch (error) { toast(error.message, "error"); }
+        } }) : null)));
+      if (!matches.length) list.append(el("p", { class: "library-empty", text: rows.length ? "No matching requirements." : "No requirements yet. Add expected behavior and link the test cases that check it." }));
+    };
+    const search = el("input", { type: "search", "aria-label": "Search requirements", placeholder: "Search requirements…", oninput: event => draw(event.target.value) });
+    container.append(el("div", { class: "library-tools" }, el("div", { class: "library-search" }, search), el("button", { class: "btn-link", text: "Refresh requirements", onclick: () => loadRequirements(project.id) })), list);
+    draw("");
+  }
+
+  function requirementForm(row) {
+    const project = selectedProject(); if (!project) return;
+    const editable = can("folders.manage");
+    const title = el("input", { "aria-label": "Requirement title", required: true, maxlength: 160, value: row?.title || "", disabled: !editable });
+    const description = el("textarea", { "aria-label": "Expected behavior / acceptance criteria", rows: 5, maxlength: 12000, disabled: !editable }); description.value = row?.description || "";
+    const status = el("select", { "aria-label": "Requirement status", disabled: !editable }, el("option", { value: "draft", text: "Draft" }), el("option", { value: "approved", text: "Approved" })); status.value = row?.status || "draft";
+    const checks = state.tests.filter(t => assignmentFor(t.file).projectId === project.id).map(t => ({ file: t.file, name: t.name || t.file, input: el("input", { type: "checkbox", checked: row?.tests.includes(t.file), disabled: !editable }) }));
+    formDialog(row ? "Requirement details" : "New requirement", el("div", { class: "requirement-form" }, el("p", { class: "muted", text: `Project: ${project.name}. Requirements are shared with the workspace; linked tests retain their own access permissions.` }), el("label", {}, "Requirement title", title), el("label", {}, "Expected behavior / acceptance criteria", description), el("label", {}, "Status", status), el("fieldset", { class: "requirement-test-picker" }, el("legend", {}, "Linked test cases"), checks.length ? checks.map(c => el("label", { class: "checkbox-row" }, c.input, c.name)) : el("p", { class: "muted", text: "Create a test case in this project to link it here." }))), editable ? "Save requirement" : "Done", async () => {
+      if (!editable) return;
+      await api(`/api/projects/${project.id}/requirements${row ? `/${row.id}` : ""}`, { method: row ? "PUT" : "POST", body: JSON.stringify({ title: title.value, description: description.value, status: status.value, tests: checks.filter(c => c.input.checked).map(c => c.file), revision: row?.revision }) });
+      await loadRequirements(project.id); toast("Requirement saved", "ok");
+    });
+  }
+
+  function renderProjectSuites() {
+    const project = selectedProject();
+    const suites = project ? state.suites.filter(s => s.projectIds?.includes(project.id)) : [];
+    $("project-suites-count").textContent = suites.length;
+    $("project-suite-list").replaceChildren(...suites.map(s => suiteRow(s, true)));
+    if (!suites.length) $("project-suite-list").append(el("li", { class: "library-empty", text: "No suites in this project yet. Create a suite here or add this project's tests to an existing suite." }));
   }
 
   async function createTest() {
@@ -474,6 +584,7 @@
       el("p", { class: "muted", text: "Start with your environment URL, then record the screen or add steps. A unique filename is created automatically." })), "Create test", async () => {
       const created = await api("/api/tests", { method: "POST", body: JSON.stringify({ name: name.value, projectId: fields.project.value, environmentId: fields.environment.value }) });
       state.projectId = fields.project.value; state.environmentId = fields.environment.value;
+      state.projectTab = "tests"; state.showAllTests = false;
       await Promise.all([loadTests(), loadFolders()]); await openTest(created.file, { force: true }); toast("Test created. Record your screen or add a step.", "ok");
     });
   }
@@ -1537,6 +1648,7 @@
   async function loadSuites() {
     state.suites = await api("/api/suites");
     renderSuiteList();
+    renderProjectSuites();
   }
 
   function suiteStatus(s) {
@@ -1552,14 +1664,16 @@
       list.append(el("li", { class: "library-empty", text: "Create your first suite to connect tests into one shared browser journey." }));
       return;
     }
-    for (const s of state.suites) {
+    for (const s of state.suites) list.append(suiteRow(s));
+  }
+
+  function suiteRow(s, fromProject = false) {
       const status = suiteStatus(s);
-      list.append(
-        el("li", {}, el("button", {
+      return el("li", {}, el("button", {
           class: `test-item${s.file === state.suiteFile ? " active" : ""}`,
           title: s.file,
           "aria-label": `Open suite ${s.name || s.file}`,
-          onclick: () => openSuite(s.file)
+          onclick: () => { state.suiteOriginProject = fromProject ? state.projectId : ""; openSuite(s.file); }
         },
           el("span", { class: "library-name" }, el("span", { class: "test-file-icon suite-file-icon", "aria-hidden": "true", text: "⇄" }), el("span", { class: "meta" },
             el("span", { class: "title", text: s.name || s.file }),
@@ -1568,14 +1682,15 @@
           el("span", { class: "library-step-count", text: String(s.testCount) }),
           el("span", { class: "library-last-run", text: s.lastRun ? fmtRelative(s.lastRun.startedAt) : "—" }),
           el("span", { class: `badge ${s.error ? "failed" : status}`, text: s.error ? "Invalid" : status === "none" ? "Not run" : status })
-        ))
-      );
-    }
+        ));
   }
 
   async function openSuite(file, { force = false } = {}) {
+    const back = document.querySelector('#suite-workspace [data-back]');
+    back.textContent = state.suiteOriginProject ? "← Project suites" : "← Suites";
+    back.dataset.back = state.suiteOriginProject ? "tests" : "suites";
     if (!force && file === state.suiteFile && state.suite) {
-      activateView("suites", "suite-workspace");
+      activateView(state.suiteOriginProject ? "tests" : "suites", "suite-workspace");
       location.hash = `suite:${encodeURIComponent(file)}`;
       return;
     }
@@ -1590,7 +1705,7 @@
     state.suiteDirty = false;
     $("suite-dirty").hidden = true;
     location.hash = `suite:${encodeURIComponent(file)}`;
-    activateView("suites", "suite-workspace");
+    activateView(state.suiteOriginProject ? "tests" : "suites", "suite-workspace");
 
     $("suite-name").value = state.suite.name || "";
     $("suite-description").value = state.suite.description || "";
@@ -1661,7 +1776,7 @@
     $("suite-dirty").hidden = false;
   }
 
-  async function createSuite() {
+  async function createSuite(projectId = "") {
     if (state.suiteDirty && !(await confirmDialog("Discard unsaved suite changes before creating another suite?", { okLabel: "Discard", danger: true }))) return;
     const raw = await promptDialog("File name for the new suite (saved in ./suites):", {
       title: "New suite",
@@ -1672,9 +1787,10 @@
     try {
       const created = await api("/api/suites", {
         method: "POST",
-        body: JSON.stringify({ file: raw.trim(), name: raw.trim().replace(/\.json$/i, "") })
+        body: JSON.stringify({ file: raw.trim(), name: raw.trim().replace(/\.json$/i, ""), ...(projectId ? { projectId } : {}) })
       });
       await loadSuites();
+      state.suiteOriginProject = projectId;
       await openSuite(created.file, { force: true });
       toast(`Created ${created.file}`, "ok");
     } catch (e) {
@@ -1688,7 +1804,8 @@
       name: $("suite-name").value,
       description: $("suite-description").value,
       continueOnFailure: $("suite-continue-on-failure").checked,
-      tests: state.suite.tests
+      tests: state.suite.tests,
+      projectId: state.suite.projectId
     };
     try {
       state.suite = await api(`/api/suites/${encodeURIComponent(state.suiteFile)}`, {
@@ -2835,7 +2952,7 @@
   }
 
   function wireSuiteControls() {
-    $("btn-new-suite").addEventListener("click", createSuite);
+    $("btn-new-suite").addEventListener("click", () => createSuite());
     $("btn-suite-save").addEventListener("click", saveSuite);
     $("btn-suite-delete").addEventListener("click", deleteSuite);
     $("suite-btn-run").addEventListener("click", runSuite);
@@ -2984,6 +3101,8 @@
 
     state.user = status.user;
     $("auth-screen").hidden = true;
+    $("app-shell").inert = true;
+    $("app-shell").setAttribute("aria-busy", "true");
     $("app-shell").hidden = false;
     renderAccount();
     wireAccountControls();
@@ -2992,6 +3111,8 @@
     await loadNotifications();
     setInterval(loadNotifications, 25000);
     await init();
+    $("app-shell").inert = false;
+    $("app-shell").removeAttribute("aria-busy");
   }
 
   async function init() {
@@ -3018,6 +3139,18 @@
     for (const btn of document.querySelectorAll(".sidebar-tabs .tab")) {
       btn.addEventListener("click", () => switchTab(btn.dataset.tab));
     }
+    $("btn-new-requirement").addEventListener("click", () => requirementForm());
+    $("btn-project-suite").addEventListener("click", () => createSuite(state.projectId));
+    const projectTabs = [...document.querySelectorAll("[data-project-tab]")];
+    projectTabs.forEach((button, index) => {
+      button.addEventListener("click", () => setProjectTab(button.dataset.projectTab));
+      button.addEventListener("keydown", event => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const next = event.key === "Home" ? 0 : event.key === "End" ? projectTabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + projectTabs.length) % projectTabs.length;
+        setProjectTab(projectTabs[next].dataset.projectTab); projectTabs[next].focus();
+      });
+    });
 
     $("btn-new").addEventListener("click", () => createTest());
     try { document.querySelector(".app").classList.toggle("drawer-collapsed", localStorage.getItem("mmqa.navCollapsed") === "1"); } catch { /* Storage may be unavailable. */ }
@@ -3033,7 +3166,7 @@
     window.matchMedia("(max-width: 760px)").addEventListener("change", () => mobileNavigation(false));
     $("btn-overview-new").addEventListener("click", () => createTest());
     $("btn-overview-reports").addEventListener("click", () => switchTab("reports"));
-    $("btn-overview-library").addEventListener("click", () => switchTab("tests"));
+    $("btn-overview-library").addEventListener("click", () => { state.projectId = ""; state.environmentId = ""; state.projectTab = "tests"; state.showAllTests = true; switchTab("tests"); });
     for (const button of document.querySelectorAll("[data-back]")) button.addEventListener("click", () => switchTab(button.dataset.back));
     document.addEventListener("click", event => {
       for (const dropdown of document.querySelectorAll(".dropdown[open]")) {
@@ -3097,9 +3230,15 @@
     async function followRoute() {
       let raw;
       try { raw = decodeURIComponent(location.hash.slice(1)); } catch { switchTab("overview"); return; }
+      if (raw.startsWith("project:")) {
+        const [id, tab, environmentId] = raw.slice(8).split("/");
+        if (state.projectId !== id || state.projectTab !== tab || state.environmentId !== (environmentId || "")) openProject(id, tab, environmentId);
+        activateView("tests", "tests-panel"); return;
+      }
       if (!raw || raw.startsWith("view:")) {
         const section = raw.slice(5) || "overview";
-        const valid = ["overview", "tests", "suites", "reports", "agents", "settings"].includes(section) ? section : "overview";
+        const valid = section === "all-tests" ? "tests" : ["overview", "tests", "suites", "reports", "agents", "settings"].includes(section) ? section : "overview";
+        if (valid === "tests") { state.projectId = ""; state.environmentId = ""; state.projectTab = "tests"; state.showAllTests = section === "all-tests"; renderTestList(); }
         const view = valid === "overview" ? "empty" : valid === "reports" ? "reports-workspace" : `${valid}-panel`;
         if (state.view !== view) switchTab(valid);
         return;

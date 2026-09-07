@@ -225,11 +225,26 @@
     </div>
 
     <section id="tests-panel" class="library-workspace page-content" hidden aria-labelledby="library-title">
-      <div class="page-heading"><div><span class="eyebrow">BUILD &amp; ORGANIZE</span><h1 id="library-title">Projects <span id="library-count" class="heading-count"></span></h1><p>One project. Clear environments. Every test in its place.</p></div><div class="page-actions"><button id="btn-new" class="btn btn-primary">+ New test</button><button id="btn-new-folder" class="btn">+ New project</button><button id="btn-import" class="btn">Import JSON…</button><input id="import-file" type="file" accept="application/json,.json" multiple hidden></div></div>
-      <div id="project-grid" class="project-grid" aria-label="Projects"></div><div id="project-context" class="project-context"></div><div id="environment-list" class="environment-list"></div>
+      <div class="project-fixed-header">
+      <div class="page-heading"><div><span class="eyebrow" id="project-eyebrow">BUILD &amp; ORGANIZE</span><h1 id="library-title"><span id="project-page-title">Projects</span> <span id="library-count" class="heading-count"></span></h1><p id="project-description">Choose a project to see its test cases, requirements, and suites.</p></div><div class="page-actions"><button id="btn-new" class="btn btn-primary">+ New test</button><button id="btn-new-folder" class="btn">+ New project</button><button id="btn-import" class="btn">Import JSON…</button><button id="btn-new-requirement" class="btn btn-primary" hidden>+ New requirement</button><button id="btn-project-suite" class="btn btn-primary" hidden>+ New suite</button><input id="import-file" type="file" accept="application/json,.json" multiple hidden></div></div>
+      <div id="project-context" class="project-context"></div>
+      <div id="project-tabs" class="project-tabs" role="tablist" aria-label="Project sections" hidden>
+        <button id="project-tab-tests" role="tab" aria-controls="project-tests-content" aria-selected="true" data-project-tab="tests">Test cases <span id="project-tests-count">0</span></button>
+        <button id="project-tab-requirements" role="tab" aria-controls="project-requirements-content" aria-selected="false" tabindex="-1" data-project-tab="requirements">Requirements <span id="project-requirements-count">0</span></button>
+        <button id="project-tab-suites" role="tab" aria-controls="project-suites-content" aria-selected="false" tabindex="-1" data-project-tab="suites">Suites <span id="project-suites-count">0</span></button>
+      </div>
+      </div>
+      <div id="project-scroll" class="project-scroll" tabindex="0" aria-label="Project content">
+      <div id="project-grid" class="project-grid" aria-label="Projects"></div>
+      <div id="project-tests-content" role="tabpanel" aria-labelledby="project-tab-tests" hidden>
+      <div id="environment-list" class="environment-list"></div>
       <div class="library-tools"><div class="library-search"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#search"/></svg><input id="test-search" type="search" placeholder="Search tests or projects…" aria-label="Search tests" autocomplete="off"></div><div id="status-filter" class="status-filter"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="passed">Passed</button><button class="chip" data-filter="failed">Failed</button><button class="chip" data-filter="running">Running</button><button class="chip" data-filter="none">Not run</button></div></div>
       <div class="library-surface surface"><div class="library-columns"><span>TEST CASE</span><span>STEPS</span><span>LAST RUN</span><span>STATUS</span></div><ul id="test-tree" class="test-list"></ul></div>
       <p id="library-summary" class="library-summary" aria-live="polite"></p>
+      </div>
+      <div id="project-requirements-content" role="tabpanel" aria-labelledby="project-tab-requirements" hidden></div>
+      <div id="project-suites-content" role="tabpanel" aria-labelledby="project-tab-suites" hidden><p class="project-tab-note">Suites containing this project's tests. Suites spanning projects appear in each relevant project.</p><div class="library-surface surface"><div class="library-columns"><span>SUITE</span><span>TESTS</span><span>LAST RUN</span><span>STATUS</span></div><ul id="project-suite-list" class="test-list"></ul></div></div>
+      </div>
     </section>
 
     <section id="suites-panel" class="library-workspace page-content" hidden aria-labelledby="suites-title">

@@ -160,6 +160,10 @@ Open **Settings → Telemetry · AI usage** (also available from the account men
 
 The limit blocks new calls once recorded usage reaches it. It does not reserve tokens for in-flight calls, so a call or concurrent calls can cross it. Failed provider calls are recorded; when the provider does not return usage, their token count is unknown and the ledger shows zero known tokens. The ledger retains the latest 2,000 calls, so long periods and daily-limit accounting are bounded by that retention. Costs use configured rates, not the provider invoice.
 
+## Project workspace
+
+Projects now open in three tabs: **Test cases**, **Requirements**, and **Suites**, each showing its count. The project header remains visible while the selected content scrolls. Add acceptance criteria in Requirements and link the test cases that verify them. See [the project workflow](docs/PROJECTS_UPGRADE.md) for access, storage and navigation details.
+
 ## Agent Testing: manual, API and optional AI
 
 Open **Agent Testing → New agent test** and choose a project, environment and testing method:

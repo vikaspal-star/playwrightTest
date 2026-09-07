@@ -143,10 +143,10 @@ test("libraries support folders, filters, draft navigation and mobile access", a
   await page.goto("/#view:tests");
   await expect(page.getByRole("heading", { name: /^Projects/ })).toBeVisible();
   const partner = page.getByRole("button", { name: `Open test ${name}`, exact: true });
-  await expect(partner).toBeVisible();
+  await expect(partner).toBeHidden();
   await page.getByRole("button", { name: "Open project Partner", exact: true }).click();
   await expect(partner).toBeVisible();
-  await expect(page.getByRole("button", { name: "Open environment Sandbox", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Filter by environment", exact: true })).toBeVisible();
   await page.getByRole("searchbox", { name: "Search tests" }).fill("Channel partner");
   await expect(partner).toBeVisible();
   await expect(page.locator("#test-tree .test-item")).toHaveCount(1);
@@ -297,7 +297,7 @@ test("projects, unique test names, embedded recording, insertion and live playba
     await projectDialog.getByLabel("Application URL", { exact: true }).fill(url);
     await projectDialog.getByRole("button", { name: "Create project", exact: true }).click();
     await expect(projectDialog).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open project Recorder project", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("heading", { name: "Recorder project", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "+ New test", exact: true }).click();
     await page.getByRole("dialog", { name: "New test", exact: true }).getByLabel("Test name").fill("Recorded journey");
     await page.getByRole("button", { name: "Create test", exact: true }).click();
@@ -397,6 +397,87 @@ test("projects, unique test names, embedded recording, insertion and live playba
     if (recordingId) await admin.post(`/api/record/${recordingId}/stop`);
     await new Promise<void>(resolve => fixture.close(() => resolve()));
   }
+});
+
+test("project tabs keep requirements, tests and suites scoped with a single content scroller", async ({ page, browser }) => {
+  const project = await (await admin.post("/api/projects", { data: { name: "Tabbed workspace", environment: { name: "Sandbox", type: "sandbox", url: "https://tabs.example/" } } })).json();
+  const target = await (await admin.post("/api/projects", { data: { name: "Separate project", environment: { name: "Sandbox", type: "sandbox", url: "https://separate.example/" } } })).json();
+  const createTest = async (file: string, projectId: string, environmentId: string) => {
+    expect((await admin.post("/api/tests", { data: { file, name: file, projectId, environmentId, steps: [] } })).status()).toBe(201);
+  };
+  await createTest("tab-test", project.id, project.environments[0].id);
+  await createTest("separate-test", target.id, target.environments[0].id);
+  expect((await admin.post("/api/suites", { data: { file: "tab-suite", tests: ["tab-test.json"] } })).status()).toBe(201);
+  expect((await admin.post("/api/suites", { data: { file: "separate-suite", tests: ["separate-test.json"] } })).status()).toBe(201);
+  expect((await member.post(`/api/projects/${project.id}/requirements`, { data: { title: "Forbidden", description: "", status: "draft", tests: [] } })).status()).toBe(403);
+  expect((await admin.post(`/api/projects/${project.id}/requirements`, { data: { title: "Wrong project", description: "", status: "draft", tests: ["separate-test.json"] } })).status()).toBe(400);
+  expect((await admin.post(`/api/projects/${project.id}/requirements`, { data: { title: "", description: "", status: "draft", tests: [] } })).status()).toBe(400);
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  await page.context().addCookies((await admin.storageState()).cookies);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/#view:tests");
+  await page.getByRole("button", { name: "Open project Tabbed workspace", exact: true }).click();
+  await expect(page.locator("#project-grid")).toBeHidden();
+  await expect(page.getByRole("tab", { name: "Test cases 1", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: "Open test tab-test", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open test separate-test", exact: true })).toBeHidden();
+  await page.getByRole("tab", { name: /^Requirements/ }).click();
+  await page.getByRole("button", { name: "+ New requirement", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "New requirement", exact: true });
+  await dialog.getByLabel("Requirement title", { exact: true }).fill("A customer can sign in");
+  await dialog.getByLabel("Expected behavior / acceptance criteria", { exact: true }).fill("Valid credentials open the account dashboard.");
+  await dialog.getByLabel("Requirement status", { exact: true }).selectOption("approved");
+  await dialog.getByRole("checkbox", { name: "tab-test", exact: true }).check();
+  await dialog.getByRole("button", { name: "Save requirement", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Requirements 1", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".requirement-summary")).toContainText("1 linked to test cases");
+  await expect(page.locator("#project-tests-content")).toBeHidden();
+  const saved = (await (await admin.get(`/api/projects/${project.id}/requirements`)).json())[0];
+  expect((await admin.put(`/api/projects/${project.id}/requirements/${saved.id}`, { data: { ...saved, revision: "stale" } })).status()).toBe(409);
+  expect((await admin.get(`/api/projects/${target.id}/requirements`)).status()).toBe(200);
+  expect(await (await admin.get(`/api/projects/${target.id}/requirements`)).json()).toEqual([]);
+  await page.reload();
+  await expect(page.getByRole("tab", { name: "Requirements 1", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Requirements 1", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: "Suites 1", exact: true })).toBeFocused();
+  await expect(page.locator("#project-suite-list")).toContainText("tab-suite");
+  await expect(page.locator("#project-suite-list")).not.toContainText("separate-suite");
+  await page.getByRole("button", { name: "+ New suite", exact: true }).click();
+  await page.locator("#confirm-input").fill("new-project-suite.json"); await page.locator("#confirm-ok").click();
+  await expect(page.locator("#suite-workspace")).toBeVisible();
+  await page.getByRole("button", { name: "← Project suites", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Suites 2", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.screenshot({ path: "test-results/project-tabs-suites.png", fullPage: true });
+  await page.getByRole("tab", { name: "Requirements 1", exact: true }).click();
+  await Promise.all(Array.from({ length: 18 }, (_, i) => admin.post(`/api/projects/${project.id}/requirements`, { data: { title: `Requirement ${i + 2}`, description: "Expected behavior for a project workflow.", status: "draft", tests: [] } })));
+  await page.getByRole("button", { name: "Refresh requirements", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Requirements 19", exact: true })).toBeVisible();
+  const tabsBefore = await page.locator("#project-tabs").boundingBox();
+  await page.locator("#project-scroll").evaluate(element => { element.scrollTop = element.scrollHeight; });
+  expect((await page.locator("#project-tabs").boundingBox())!.y).toBe(tabsBefore!.y);
+  expect(await page.locator("#tests-panel").evaluate(element => element.scrollTop)).toBe(0);
+  await page.locator("#project-scroll").evaluate(element => { element.scrollTop = 0; });
+  await page.screenshot({ path: "test-results/project-tabs-requirements.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("tab", { name: "Requirements 19", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await page.screenshot({ path: "test-results/project-tabs-mobile.png", fullPage: true });
+  // Restricted test names and links must not leak through project requirements.
+  await admin.put("/api/tests/tab-test.json/sharing", { data: { visibility: "restricted", sharedWith: [] } });
+  const visible = await (await member.get(`/api/projects/${project.id}/requirements`)).json();
+  expect(visible.find((r: { id: string }) => r.id === saved.id).tests).toEqual([]);
+  const viewer = await browser.newContext({ storageState: await member.storageState() });
+  const viewerPage = await viewer.newPage();
+  try {
+    await viewerPage.goto(`http://127.0.0.1:4187/#project:${project.id}/requirements/`);
+    await expect(viewerPage.getByRole("button", { name: "A customer can sign in", exact: true })).toBeVisible();
+    await expect(viewerPage.getByRole("button", { name: "+ New requirement", exact: true })).toBeHidden();
+  } finally { await viewer.close(); }
+  expect((await admin.delete(`/api/projects/${project.id}/requirements/${saved.id}`, { data: { revision: saved.revision } })).status()).toBe(204);
+  expect((await admin.get("/api/tests/tab-test.json")).status()).toBe(200);
+  expect(errors).toEqual([]);
 });
 
 test("agent testing creates, runs and exports real multi-turn conversations from a responsive workspace", async ({ page, playwright }) => {
