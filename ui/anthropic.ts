@@ -26,6 +26,7 @@ async function callModel(options: {
   username?: string;
   subject?: string;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set on the server.");
@@ -35,7 +36,7 @@ async function callModel(options: {
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/v1/messages`, {
-      signal: AbortSignal.timeout(options.timeoutMs ?? 45000),
+      signal: AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? 45000), ...(options.signal ? [options.signal] : [])]),
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -106,6 +107,18 @@ export interface AnalysisResult {
 
 export function isConfigured(): boolean {
   return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+/** Bounded, metered calls for scenario generation, persona turns and evaluation. */
+export async function agentTestingAI(prompt: string, username: string, subject: string, signal: AbortSignal): Promise<unknown> {
+  let text: string;
+  try {
+    text = await callModel({ feature: "agent-testing", maxTokens: 2400, content: prompt, username, subject, signal });
+  } catch {
+    throw new Error("AI request failed. Check the configured provider, model, daily allowance and server connection.");
+  }
+  try { return JSON.parse(text.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "")); }
+  catch { throw new Error("AI returned invalid JSON. Review the run and retry."); }
 }
 
 /** Only structural counts and environment types are sent; test inputs and credentials stay local. */

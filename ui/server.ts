@@ -56,6 +56,7 @@ import * as recorder from "./recorder";
 import * as screencast from "./agent/screencast";
 import { AnalysisResult, analyzeFailure, analyzeRun, analyzeAdaptation, isConfigured as aiConfigured } from "./anthropic";
 import * as aiUsage from "./aiUsage";
+import { agentTestingRouter } from "./agentTestingRoutes";
 import { ROOT, WORKSPACE, JSON_DIR, SUITES_DIR, RUNS_DIR, DATA_DIR, HOST, PORT, MAX_ACTIVE_RUNS, RUN_TIMEOUT_MS } from "./config";
 import { readJson, writeJson, acquireWorkspaceLock } from "./storage";
 import { validateTest, ValidationError } from "../src/validation";
@@ -951,6 +952,7 @@ app.disable("x-powered-by");
 app.use(securityHeaders);
 app.use("/api", sameOrigin);
 app.use(express.json({ limit: "5mb" }));
+app.use("/api/agent-tests", agentTestingRouter(requireFeature));
 app.use(["/api/auth/setup", "/api/auth/login", "/api/auth/change-password"], authRateLimit());
 
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
@@ -1868,9 +1870,15 @@ app.post("/api/runs/:id/summarize", async (req, res) => {
 // What the AI features have cost. Token counts come from the provider's own
 // usage block rather than an estimate, priced with the configured rates.
 app.get("/api/ai/usage", (req, res) => {
-  requireAuth(req);
+  const user = requireAuth(req);
+  const username = user.role === "site_admin" ? undefined : user.username;
   const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
-  res.json({ summary: aiUsage.summary(days), recent: aiUsage.recent(25) });
+  res.json({ summary: aiUsage.summary(days, username), recent: aiUsage.recent(25, username).map(({ subject: _subject, error: _error, ...row }) => row), scope: username === undefined ? "workspace" : "personal", configured: aiConfigured(), retainedRecordLimit: 2000 });
+});
+
+app.get("/api/overview/counts", (req, res) => {
+  requireAuth(req);
+  res.json({ projects: projectStore().projects.length, users: listUsers().length });
 });
 
 app.get("/api/ai/status", (req, res) => {

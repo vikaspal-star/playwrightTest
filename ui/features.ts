@@ -39,6 +39,7 @@ export const FEATURES: FeatureSpec[] = [
   { id: "suites.run", label: "Run suites", description: "Execute a whole suite in one browser session." },
   { id: "reports.view", label: "View reports", description: "See the aggregate pass/fail reporting dashboard." },
   { id: "ai.analyze", label: "AI analysis", description: "Review failures and environment adaptation with the configured AI provider." },
+  { id: "agents.manage", label: "Agent testing", description: "Create private chat-agent scenarios, call their endpoints, and review conversation evidence." },
   { id: "users.manage", label: "Manage users", description: "Add and remove accounts." }
 ];
 
@@ -49,7 +50,7 @@ export const DEFAULT_FEATURES: Record<Role, string[]> = {
   admin: [
     "tests.create", "tests.edit", "tests.delete", "tests.run",
     "folders.manage", "suites.manage", "suites.run",
-    "reports.view", "ai.analyze", "users.manage"
+    "reports.view", "ai.analyze", "agents.manage", "users.manage"
   ],
   // Members can run things, build their own tests, and see reports. Destructive
   // or costly actions (delete, user admin, paid AI calls) stay opt-in per user.

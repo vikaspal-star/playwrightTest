@@ -399,6 +399,126 @@ test("projects, unique test names, embedded recording, insertion and live playba
   }
 });
 
+test("agent testing creates, runs and exports real multi-turn conversations from a responsive workspace", async ({ page, playwright }) => {
+  const { createServer } = await import("node:http");
+  const requests: Array<{ message: string; sessionId: string; messages: unknown[] }> = [];
+  const fixture = createServer(async (req, res) => {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const data = JSON.parse(body); requests.push(data);
+    if (req.url === "/slow") { res.setHeader("Content-Type", "application/json"); res.write("{"); return; }
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ reply: data.message.includes("name") ? "Your name is Ana. I can help with returns." : "I can help. Returns are accepted within 30 days." }));
+  });
+  await new Promise<void>(resolve => fixture.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${(fixture.address() as import("node:net").AddressInfo).port}/chat`;
+  const other = await playwright.request.newContext({ baseURL: "http://127.0.0.1:4187" });
+  try {
+    const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
+    const project = await (await admin.post("/api/projects", { data: { name: "Agent evaluation", environment: { name: "Sandbox", type: "sandbox", url: "http://localhost:9999/" } } })).json();
+    expect((await member.get("/api/agent-tests")).status()).toBe(403);
+    expect((await admin.post("/api/users", { data: { username: "agent-tester", password, role: "member", features: ["agents.manage"] } })).status()).toBe(201);
+    expect((await other.post("/api/auth/login", { data: { username: "agent-tester", password } })).status()).toBe(200);
+    await page.context().addCookies((await admin.storageState()).cookies);
+    await page.goto("/#view:agents");
+    await expect(page.getByRole("heading", { name: "Agent Testing", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Create your first agent test", exact: true }).click();
+    await page.getByLabel("Agent name", { exact: true }).fill("Returns assistant");
+    await page.getByLabel("Project", { exact: true }).selectOption(project.id);
+    await page.getByLabel("Chat API URL", { exact: true }).fill(url);
+    await page.getByLabel("Agent requirements", { exact: true }).fill("Help with returns. The return window is 30 days. Remember the customer's name.");
+    await page.getByRole("button", { name: "Continue to scenarios →", exact: true }).click();
+    await page.getByLabel("User messages (one per line)", { exact: true }).fill("My name is Ana\nWhat is my name?");
+    await page.getByLabel("Expected behavior or text", { exact: true }).fill("Ana");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.locator("#agent-save-state")).toHaveText("All changes saved");
+    const saved = (await (await admin.get("/api/agent-tests")).json()).plans.find((p: { plan: { name: string } }) => p.plan.name === "Returns assistant");
+    expect(saved.plan.environmentId).toBe(project.environments[0].id);
+    expect((await other.get("/api/agent-tests")).status()).toBe(200);
+    expect((await (await other.get("/api/agent-tests")).json()).plans).toEqual([]);
+    expect((await other.put(`/api/agent-tests/${saved.id}`, { data: { plan: saved.plan, revision: saved.revision } })).status()).toBe(404);
+    await page.getByRole("button", { name: "Run all scenarios", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Conversation evidence", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Export JSON", exact: true })).toBeVisible();
+    const history = await (await admin.get(`/api/agent-tests/${saved.id}/runs`)).json();
+    expect(history[0].status).toBe("passed");
+    const runId = history[0].id;
+    const run = await (await admin.get(`/api/agent-tests/runs/${runId}`)).json();
+    expect(run.results[0].transcript).toHaveLength(4);
+    expect(requests[0].sessionId).toBe(requests[1].sessionId); expect(requests[1].messages).toHaveLength(3);
+    expect(run.results[0].checks[0].evidence).toContain("Ana");
+    for (const route of [`/api/agent-tests/${saved.id}/runs`, `/api/agent-tests/runs/${runId}`, `/api/agent-tests/runs/${runId}/export`]) expect((await other.get(route)).status()).toBe(404);
+    expect((await other.post(`/api/agent-tests/runs/${runId}/cancel`, { data: {} })).status()).toBe(404);
+    const xml = await (await admin.get(`/api/agent-tests/runs/${runId}/export?format=junit`)).text(); expect(xml).toContain('failures="0"'); expect(xml).toContain("Your name is Ana");
+    await page.screenshot({ path: "test-results/agent-testing-results.png", fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: "test-results/agent-testing-mobile.png", fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    // Failures preserve evidence and historical plans remain unchanged after edits.
+    saved.plan.scenarios[0].criteria[0].value = "a phrase never returned";
+    const updated = await (await admin.put(`/api/agent-tests/${saved.id}`, { data: { plan: saved.plan, revision: saved.revision } })).json();
+    expect((await admin.put(`/api/agent-tests/${saved.id}`, { data: { plan: saved.plan, revision: saved.revision } })).status()).toBe(409);
+    const failedRun = await (await admin.post(`/api/agent-tests/${saved.id}/run`, { data: { revision: updated.revision } })).json();
+    await expect.poll(async () => (await (await admin.get(`/api/agent-tests/runs/${failedRun.id}`)).json()).status).toBe("failed");
+    expect(await (await admin.get(`/api/agent-tests/runs/${failedRun.id}/export?format=junit`)).text()).toContain('failures="1"');
+    expect((await (await admin.get(`/api/agent-tests/runs/${runId}`)).json()).plan.scenarios[0].criteria[0].value).toBe("Ana");
+    updated.plan.endpoint = url.replace("/chat", "/slow");
+    const slow = await (await admin.put(`/api/agent-tests/${saved.id}`, { data: { plan: updated.plan, revision: updated.revision } })).json();
+    const running = await (await admin.post(`/api/agent-tests/${saved.id}/run`, { data: { revision: slow.revision } })).json();
+    await expect.poll(() => requests.length).toBeGreaterThanOrEqual(5);
+    expect((await admin.post(`/api/agent-tests/runs/${running.id}/cancel`, { data: {} })).status()).toBe(202);
+    await expect.poll(async () => (await (await admin.get(`/api/agent-tests/runs/${running.id}`)).json()).status).toBe("cancelled");
+    expect(await (await admin.get(`/api/agent-tests/runs/${running.id}/export?format=junit`)).text()).toContain("<failure");
+    const ownAI = { ...saved.plan, name: "Private rubric" }; ownAI.scenarios[0].criteria[0].kind = "ai";
+    const privatePlan = await (await other.post("/api/agent-tests", { data: ownAI })).json();
+    expect((await other.post(`/api/agent-tests/${privatePlan.id}/run`, { data: { revision: privatePlan.revision } })).status()).toBe(403);
+    privatePlan.plan.scenarios.push({ ...structuredClone(privatePlan.plan.scenarios[0]), criteria: [{ name: "Text only", kind: "contains", value: "Ana", critical: true, threshold: 0.8 }] });
+    const mixedPlan = await (await other.put(`/api/agent-tests/${privatePlan.id}`, { data: { revision: privatePlan.revision, plan: privatePlan.plan } })).json();
+    const textOnly = await other.post(`/api/agent-tests/${privatePlan.id}/run`, { data: { revision: mixedPlan.revision, scenarioIndex: 1 } });
+    expect(textOnly.status()).toBe(202);
+    const textOnlyRun = await textOnly.json();
+    await expect.poll(async () => (await (await other.get(`/api/agent-tests/runs/${textOnlyRun.id}`)).json()).status).toBe("passed");
+    expect((await other.post("/api/agent-tests/generate", { data: { requirements: "test" } })).status()).toBe(403);
+    // Manual testing needs no endpoint and never makes target API requests.
+    const requestsBeforeManual = requests.length;
+    await page.getByRole("button", { name: "+ New agent test", exact: true }).click();
+    await page.getByLabel("Testing method", { exact: true }).selectOption("manual");
+    await expect(page.getByLabel("Chat API URL", { exact: true })).toBeHidden();
+    await page.getByLabel("Agent name", { exact: true }).fill("Manual support review");
+    await page.getByLabel("Project", { exact: true }).selectOption(project.id);
+    await page.getByLabel("Agent requirements", { exact: true }).fill("Help the customer with their request.");
+    await page.getByRole("button", { name: "Start manual test", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Record your manual test", exact: true })).toBeVisible();
+    await page.getByLabel("Observed reply 1.1", { exact: true }).fill("I can help with your account.");
+    await page.getByLabel("Observed reply 1.2", { exact: true }).fill("Please open Settings to continue.");
+    await page.getByRole("button", { name: "Save evidence & evaluate", exact: true }).click();
+    await expect(page.locator("#agent-content")).toContainText("Manually entered evidence");
+    await expect(page.getByRole("link", { name: "Export JSON", exact: true })).toBeVisible();
+    expect(requests.length).toBe(requestsBeforeManual);
+    const manualPlan = (await (await admin.get("/api/agent-tests")).json()).plans.find((p: { plan: { name: string } }) => p.plan.name === "Manual support review");
+    expect(manualPlan.plan.endpoint).toBe("");
+    expect((await admin.post(`/api/agent-tests/${manualPlan.id}/run`, { data: { revision: manualPlan.revision } })).status()).toBe(400);
+    await page.screenshot({ path: "test-results/agent-testing-manual.png", fullPage: true });
+    // Overview counts are live aggregates, without exposing account records.
+    const counts = await (await admin.get("/api/overview/counts")).json();
+    await page.getByRole("button", { name: "Workspace overview", exact: true }).click();
+    await expect(page.locator(".stat-projects strong")).toHaveText(String(counts.projects));
+    await expect(page.locator(".stat-users strong")).toHaveText(String(counts.users));
+    await page.screenshot({ path: "test-results/overview-projects-users.png", fullPage: true });
+    // Telemetry scopes calls to their owner except for site-admin workspace totals.
+    const usage = [{ at: new Date().toISOString(), feature: "agent-testing", model: "fixture", username: "owner", inputTokens: 100, outputTokens: 50, costUsd: 0.001, ok: true, subject: "private-plan" }, { at: new Date().toISOString(), feature: "agent-testing", model: "fixture", username: "agent-tester", inputTokens: 20, outputTokens: 10, costUsd: 0.0002, ok: true }];
+    fs.writeFileSync(path.join(process.env.STUDIO_TEST_WORKSPACE!, "ui", "data", "aiUsage.json"), JSON.stringify(usage));
+    const ownUsage = await (await other.get("/api/ai/usage")).json();
+    expect(ownUsage.scope).toBe("personal"); expect(ownUsage.summary.totalTokens).toBe(30); expect(JSON.stringify(ownUsage)).not.toContain("private-plan"); expect(JSON.stringify(ownUsage)).not.toContain('"owner"');
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Telemetry · AI usage", exact: true })).toBeVisible();
+    await expect(page.locator("#settings-telemetry")).toContainText("180");
+    await expect(page.locator("#settings-telemetry")).toContainText("agent-testing");
+    await page.screenshot({ path: "test-results/settings-telemetry.png", fullPage: true });
+    expect(errors).toEqual([]);
+  } finally { await other.dispose(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve())); }
+});
+
 test("password form revokes other sessions and keeps the current session", async ({ playwright, page }) => {
   const other = await playwright.request.newContext({ baseURL: "http://127.0.0.1:4187" });
   try {

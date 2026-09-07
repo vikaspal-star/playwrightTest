@@ -297,6 +297,9 @@
     activateView(tab, tab === "overview" ? "empty" : `${tab}-panel`);
     location.hash = `view:${tab}`;
     if (tab === "overview") renderOverview();
+    if (tab === "overview") void loadOverviewCounts();
+    if (tab === "settings") void renderAiUsage($("settings-telemetry"), Number($("telemetry-days").value));
+    if (tab === "agents") void window.AgentTesting.open({ api, el, can, toast, confirmDialog, projects: state.projects });
   }
 
   function activateView(section, view) {
@@ -307,8 +310,8 @@
       btn.classList.toggle("active", active);
       if (active) btn.setAttribute("aria-current", "page"); else btn.removeAttribute("aria-current");
     }
-    for (const id of ["empty", "tests-panel", "suites-panel", "workspace", "suite-workspace", "reports-workspace"]) $(id).hidden = id !== view;
-    $("page-label").textContent = { overview: "Overview", tests: "Projects", suites: "Suites", reports: "Reports" }[section];
+    for (const id of ["empty", "tests-panel", "suites-panel", "workspace", "suite-workspace", "reports-workspace", "agents-panel", "settings-panel"]) $(id).hidden = id !== view;
+    $("page-label").textContent = { overview: "Overview", tests: "Projects", suites: "Suites", reports: "Reports", agents: "Agent Testing", settings: "Settings" }[section];
     mobileNavigation(false);
   }
 
@@ -348,8 +351,10 @@
 
   function renderOverview() {
     const tests = state.tests;
-    const stats = [["Test cases", tests.length, "Across your workspace", "all"], ["Passed latest run", tests.filter(t => testStatus(t) === "passed").length, "Latest standalone results", "passed"], ["Need attention", tests.filter(t => t.error || testStatus(t) === "failed").length, "Failed or invalid tests", "attention"], ["Never run", tests.filter(t => !t.lastRun && !t.running).length, "Ready for a first run", "none"]];
+    const stats = [["Projects", state.overviewCounts?.projects ?? state.projects.length, "Organized workspaces", "projects"], ["Users", state.overviewCounts?.users ?? "—", "Workspace accounts", "users"], ["Test cases", tests.length, "Across your workspace", "all"], ["Passed latest run", tests.filter(t => testStatus(t) === "passed").length, "Latest standalone results", "passed"], ["Need attention", tests.filter(t => t.error || testStatus(t) === "failed").length, "Failed or invalid tests", "attention"], ["Never run", tests.filter(t => !t.lastRun && !t.running).length, "Ready for a first run", "none"]];
     $("overview-stats").replaceChildren(...stats.map(([label, value, caption, filter]) => el("button", { class: `overview-stat stat-${filter}`, onclick: () => {
+      if (filter === "projects") { state.projectId = ""; state.environmentId = ""; renderTestList(); switchTab("tests"); return; }
+      if (filter === "users") { if (can("users.manage")) $("btn-manage-users").click(); else toast("Workspace account total. User management requires permission."); return; }
       state.statusFilter = filter;
       state.search = "";
       $("test-search").value = "";
@@ -365,6 +370,11 @@
       el("span", { class: "activity-time", text: t.lastRun ? fmtRelative(t.lastRun.startedAt) : "—" }),
       el("span", { class: `badge ${t.error ? "failed" : testStatus(t)}`, text: t.error ? "Invalid" : testStatus(t) === "none" ? "Not run" : testStatus(t) })
     )) : [el("p", { class: "library-empty", text: "Start with your first test. Create one or import an existing test from the projects." })]));
+  }
+
+  async function loadOverviewCounts() {
+    try { state.overviewCounts = await api("/api/overview/counts"); renderOverview(); }
+    catch { state.overviewCounts = null; renderOverview(); }
   }
 
   async function loadFolders() {
@@ -1877,14 +1887,14 @@
     container.append(table);
   }
 
-  const fmtUsd = n => n >= 1 ? `${n.toFixed(2)}` : n > 0 ? `${n.toFixed(4)}` : "$0";
+  const fmtUsd = n => n >= 1 ? `$${n.toFixed(2)}` : n > 0 ? `$${n.toFixed(4)}` : "$0";
   const fmtTokens = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 
-  async function renderAiUsage(container) {
+  async function renderAiUsage(container, days = state.reportDays || 30) {
     if (!container) return;
     let data;
     try {
-      data = await api(`/api/ai/usage?days=${state.reportDays || 30}`);
+      data = await api(`/api/ai/usage?days=${days}`);
     } catch (e) {
       container.replaceChildren(el("div", { class: "muted", text: e.message }));
       return;
@@ -1892,16 +1902,13 @@
     const s = data.summary;
     container.replaceChildren();
 
-    if (!s.calls) {
-      container.append(el("div", { class: "muted", text: "No AI calls yet. Analysing a failure or summarising a run will appear here with its token cost." }));
-      return;
-    }
+    container.append(el("p", { class: "agent-notice", text: `${data.scope === "workspace" ? "Workspace usage" : "Your usage"} · ${data.configured ? "AI provider configured" : "AI provider not configured"}. Includes scenario generation, adaptive personas, rubric evaluation and test analysis. No conversation content is shown here.` }));
 
     container.append(el("div", { class: "rr-cards" },
-      rrCard("Spend", fmtUsd(s.costUsd), null, `${s.calls} call${s.calls === 1 ? "" : "s"}${s.failedCalls ? ` · ${s.failedCalls} failed` : ""}`),
+      rrCard("Estimated spend", fmtUsd(s.costUsd), null, `${s.calls} call${s.calls === 1 ? "" : "s"}${s.failedCalls ? ` · ${s.failedCalls} failed` : ""}`),
       rrCard("Tokens", fmtTokens(s.totalTokens), null, `${fmtTokens(s.inputTokens)} in · ${fmtTokens(s.outputTokens)} out`),
       rrCard("Today", fmtTokens(s.cap.usedToday), null,
-        s.cap.dailyTokenCap ? `cap ${fmtTokens(s.cap.dailyTokenCap)} · ${fmtTokens(s.cap.remaining)} left` : "no cap set"),
+        s.cap.dailyTokenCap ? `cap ${fmtTokens(s.cap.dailyTokenCap)} · ${fmtTokens(s.cap.remaining)} left` : data.scope === "personal" ? "your tokens today · UTC" : "no cap set · UTC"),
       rrCard("Rate", `${s.pricing.inputPerMillionUsd}/${s.pricing.outputPerMillionUsd}`, null, "per M in / out")
     ));
 
@@ -1925,6 +1932,10 @@
     if (byFeature) container.append(rrSection("Where the spend goes", byFeature));
     const byUser = table("User", s.byUser, "username");
     if (byUser) container.append(rrSection("Who is spending it", byUser));
+    const daily = table("Date (UTC)", s.byDay.map(row => ({ ...row, calls: "—" })), "date");
+    if (daily) container.append(rrSection("Daily consumption", daily));
+    if (!s.calls) container.append(el("p", { class: "muted", text: "No AI calls in this period. Manual and scripted checks do not consume evaluator tokens." }));
+    container.append(el("p", { class: "agent-muted", text: "Telemetry retains the latest 2,000 calls. Costs use configured USD rates; this is not a provider invoice. Failures without reported usage show zero known tokens. The daily limit stops new calls once recorded usage reaches it; in-flight calls may exceed it." }));
   }
 
   function renderDepartmentTable(container, rows) {
@@ -2984,6 +2995,12 @@
   }
 
   async function init() {
+    $("nav-agents").hidden = !can("agents.manage");
+    window.addEventListener("beforeunload", event => { if (window.AgentTesting.isDirty()) { event.preventDefault(); event.returnValue = ""; } });
+    $("btn-telemetry").addEventListener("click", () => { $("account-menu").open = false; switchTab("settings"); });
+    $("telemetry-refresh").addEventListener("click", () => renderAiUsage($("settings-telemetry"), Number($("telemetry-days").value)));
+    $("telemetry-days").addEventListener("change", () => renderAiUsage($("settings-telemetry"), Number($("telemetry-days").value)));
+    void loadOverviewCounts();
     try {
       const catalog = await api("/api/actions");
       state.actions = catalog.actions;
@@ -3082,7 +3099,7 @@
       try { raw = decodeURIComponent(location.hash.slice(1)); } catch { switchTab("overview"); return; }
       if (!raw || raw.startsWith("view:")) {
         const section = raw.slice(5) || "overview";
-        const valid = ["overview", "tests", "suites", "reports"].includes(section) ? section : "overview";
+        const valid = ["overview", "tests", "suites", "reports", "agents", "settings"].includes(section) ? section : "overview";
         const view = valid === "overview" ? "empty" : valid === "reports" ? "reports-workspace" : `${valid}-panel`;
         if (state.view !== view) switchTab(valid);
         return;

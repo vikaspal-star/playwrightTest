@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="studio.css">
+  <link rel="stylesheet" href="agent-testing.css">
   <link rel="stylesheet" href="projects.css">
 </head>
 <body>
@@ -189,6 +190,8 @@
       <button class="tab" data-tab="tests"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#tests"/></svg><span>Projects</span><span id="nav-test-count" class="nav-count">0</span></button>
       <button class="tab" data-tab="suites"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#suites"/></svg><span>Suites</span><span id="nav-suite-count" class="nav-count">0</span></button>
       <button class="tab" data-tab="reports"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#reports"/></svg><span>Reports</span></button>
+      <button id="nav-agents" class="tab" data-tab="agents" hidden><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#tests"/></svg><span>Agent Testing</span></button>
+      <button class="tab" data-tab="settings"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#reports"/></svg><span>Settings</span></button>
     </nav>
     <div class="sidebar-note"><span class="environment-dot"></span><div><strong>Local workspace</strong><span>Powered by Playwright</span></div></div>
   </aside>
@@ -201,11 +204,16 @@
         <button id="btn-notifications" class="bell" title="Notifications" aria-label="Notifications"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#bell"/></svg><span id="bell-count" class="bell-count" hidden>0</span></button>
         <details id="account-menu" class="dropdown account-menu">
           <summary aria-label="Account menu"><span id="account-avatar" class="account-avatar">M</span><span class="account-info"><span id="account-name" class="account-name"></span><span id="account-role" class="account-role"></span></span><svg class="icon icon-small" aria-hidden="true"><use href="brand/icons.svg#chevron"/></svg></summary>
-          <div class="dropdown-panel"><span class="menu-caption">YOUR ACCOUNT</span><button id="btn-manage-users" hidden>Manage users</button><button id="btn-password">Password</button><div class="menu-divider"></div><button id="btn-logout">Log out</button></div>
+          <div class="dropdown-panel"><span class="menu-caption">YOUR ACCOUNT</span><button id="btn-manage-users" hidden>Manage users</button><button id="btn-telemetry">Settings · AI telemetry</button><button id="btn-password">Password</button><div class="menu-divider"></div><button id="btn-logout">Log out</button></div>
         </details>
       </div>
     </header>
 
+    <section id="agents-panel" class="page-content" hidden aria-label="Agent Testing"></section>
+    <section id="settings-panel" class="page-content" hidden aria-labelledby="settings-title">
+      <div class="page-heading"><div><span class="eyebrow">WORKSPACE SETTINGS</span><h1 id="settings-title">Settings</h1><p>Monitor AI activity and token consumption.</p></div></div>
+      <div class="surface agent-card"><div class="agent-section-heading"><div><h2>Telemetry · AI usage</h2><p class="agent-muted">Reported tokens, estimated spend, and the features using them.</p></div><div class="agent-actions"><label class="agent-field">Period<select id="telemetry-days"><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option></select></label><button class="btn" id="telemetry-refresh">Refresh</button></div></div><div id="settings-telemetry" aria-live="polite"></div></div>
+    </section>
     <div id="empty" class="empty page-content">
       <div class="page-heading overview-heading"><div><span class="eyebrow">WORKSPACE HEALTH</span><h1>Workspace overview</h1><p>Your tests, results, and next steps. All in one place.</p></div><button id="btn-overview-new" class="btn btn-primary">+ Create a test</button></div>
       <div id="overview-stats" class="overview-stats" aria-label="Workspace statistics"></div>
@@ -487,6 +495,7 @@
   </div>
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="agent-testing.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

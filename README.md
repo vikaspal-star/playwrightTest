@@ -156,7 +156,21 @@ AI_PRICE_OUTPUT=15        # USD per million output tokens
 AI_DAILY_TOKEN_CAP=200000 # optional; 0 or unset means no cap
 ```
 
-With a cap set, a call that would cross it is refused before spending anything, so a runaway loop stops rather than becoming a bill. Failed provider calls are recorded too: a failure still consumes input tokens.
+Open **Settings → Telemetry · AI usage** (also available from the account menu) to view token consumption, estimated USD spend, date ranges, feature/user breakdowns and daily totals. Site admins see workspace usage; other accounts see their own calls. Reports retains its existing usage panel. Overview now includes live project and user counts.
+
+The limit blocks new calls once recorded usage reaches it. It does not reserve tokens for in-flight calls, so a call or concurrent calls can cross it. Failed provider calls are recorded; when the provider does not return usage, their token count is unknown and the ledger shows zero known tokens. The ledger retains the latest 2,000 calls, so long periods and daily-limit accounting are bounded by that retention. Costs use configured rates, not the provider invoice.
+
+## Agent Testing: manual, API and optional AI
+
+Open **Agent Testing → New agent test** and choose a project, environment and testing method:
+
+- **Manual:** describe expected behavior and scenario messages. Start a manual test, follow those messages in your agent's interface, paste the actual replies, then save the evidence and evaluate. No chat API is required. Reports identify these replies as manually entered; timing is not measured.
+- **API:** supply the chat endpoint, JSON request template and dot-separated response path. Configure credentials as a server environment variable beginning `MMQA_AGENT_`, containing JSON headers, and reference its name in the form. Each scenario gets a fresh session ID and subsequent messages include the conversation history when configured in the template.
+- **Optional AI:** generate draft scenarios from requirements, enable adaptive personas for API tests, or choose AI rubric checks for either testing method. These need `ANTHROPIC_API_KEY` and the `ai.analyze` feature. All evaluator calls use existing token telemetry. Scripted messages and text checks work without the evaluator key; the target API may have its own charges.
+
+Runs retain the plan snapshot, transcript, checks, thresholds, evidence and outcome. Critical failures fail the run; advisory failures, uncertain AI judgments or unverifiable quotes need review. Run a single scenario or the complete saved group, stop an API run, inspect previous runs, and export JSON or JUnit. JUnit treats every non-pass as a failure so incomplete checks do not silently pass CI.
+
+See [the LambdaTest review and supported scope](docs/LAMBDATEST_REVIEW.md) for the comparison, limits, API routes and remaining integrations.
 
 ## CI
 

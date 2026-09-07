@@ -80,7 +80,7 @@ button, input, select, summary { font: inherit; }
 /* Overview */
 .empty { display: block; width: 100%; margin: 0; text-align: left; color: var(--text); }
 .overview-heading { max-width: none; }
-.overview-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px; margin-bottom: 28px; }
+.overview-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; margin-bottom: 28px; }
 .overview-stat { min-width: 0; background: #fff; border: 1px solid var(--border); border-radius: 9px; padding: 18px 20px; text-align: left; display: flex; flex-direction: column; gap: 10px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
 .overview-stat:hover { border-color: #bbcadf; box-shadow: 0 3px 12px #24395408; }
 .stat-topline { font-size: 13px; color: #61718a; font-weight: 550; display: flex; align-items: center; gap: 8px; }

@@ -15,10 +15,5 @@ export default defineConfig({
   outputDir: "test-results/studio",
   reporter: [["list"], ["html", { outputFolder: "playwright-report/studio", open: "never" }]],
   use: { baseURL: "http://127.0.0.1:4187", headless: true, screenshot: "only-on-failure", trace: "retain-on-failure" },
-  webServer: {
-    command: "node --import tsx ui/server.ts",
-    url: "http://127.0.0.1:4187/api/health",
-    reuseExistingServer: false,
-    env: { STUDIO_WORKSPACE: workspace, PORT: "4187", HOST: "127.0.0.1", DB_DISABLED: "1", RECORDER_HEADLESS: "1" }
-  }
+  globalSetup: "./tests/studio/setup.ts"
 });

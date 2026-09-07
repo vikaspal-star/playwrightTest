@@ -1,5 +1,7 @@
 # MMQA Studio upgrade review
 
+The subsequent Projects, environments and embedded browser upgrade is documented in [PROJECTS_UPGRADE.md](PROJECTS_UPGRADE.md), including additive migration and recovery details.
+
 Reviewed against the README, action catalog, executor, API routes, browser UI, persistence, optional integrations, and workflow configuration on 2026-09-05.
 
 ## Product requirement reconstructed from the application

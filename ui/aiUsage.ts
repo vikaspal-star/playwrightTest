@@ -159,8 +159,8 @@ export function assertWithinCap(): void {
   }
 }
 
-export function summary(days = 30): UsageSummary {
-  const records = since(days);
+export function summary(days = 30, username?: string): UsageSummary {
+  const records = since(days).filter(r => username === undefined || r.username === username);
   const inputTokens = records.reduce((sum, r) => sum + r.inputTokens, 0);
   const outputTokens = records.reduce((sum, r) => sum + r.outputTokens, 0);
   const costUsd = Math.round(records.reduce((sum, r) => sum + r.costUsd, 0) * 1_000_000) / 1_000_000;
@@ -174,7 +174,7 @@ export function summary(days = 30): UsageSummary {
     byDayMap.set(date, entry);
   }
 
-  const usedToday = tokensUsedToday();
+  const usedToday = username === undefined ? tokensUsedToday() : load().filter(r => r.username === username && r.at.slice(0, 10) === new Date().toISOString().slice(0, 10)).reduce((sum, r) => sum + r.inputTokens + r.outputTokens, 0);
 
   return {
     days,
@@ -190,9 +190,9 @@ export function summary(days = 30): UsageSummary {
       .map(([date, v]) => ({ date, totalTokens: v.totalTokens, costUsd: Math.round(v.costUsd * 1_000_000) / 1_000_000 }))
       .sort((a, b) => a.date.localeCompare(b.date)),
     cap: {
-      dailyTokenCap: DAILY_TOKEN_CAP,
+      dailyTokenCap: username === undefined ? DAILY_TOKEN_CAP : 0,
       usedToday,
-      remaining: DAILY_TOKEN_CAP > 0 ? Math.max(0, DAILY_TOKEN_CAP - usedToday) : null
+      remaining: username === undefined && DAILY_TOKEN_CAP > 0 ? Math.max(0, DAILY_TOKEN_CAP - usedToday) : null
     },
     pricing: {
       inputPerMillionUsd: PRICE_PER_MILLION_INPUT,
@@ -201,6 +201,6 @@ export function summary(days = 30): UsageSummary {
   };
 }
 
-export function recent(limit = 50): UsageRecord[] {
-  return load().slice(-limit).reverse();
+export function recent(limit = 50, username?: string): UsageRecord[] {
+  return load().filter(r => username === undefined || r.username === username).slice(-limit).reverse();
 }

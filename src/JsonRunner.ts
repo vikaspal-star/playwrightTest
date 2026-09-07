@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { validateTest } from "./validation";
+import { startLiveScreen } from "./liveScreen";
 
 import {
   Page
@@ -35,7 +36,7 @@ export interface TestCase {
 const RUN_DIR = process.env.RUN_DIR;
 
 function emit(
-  type: "TEST" | "STEP",
+  type: "TEST" | "STEP" | "FRAME",
   payload: Record<string, unknown>
 ): void {
 
@@ -177,10 +178,14 @@ export class JsonRunner {
 
 
       try {
-
-        await this.executor.execute(
-          step
-        );
+        const cancelled = () => RUN_DIR && fs.existsSync(path.join(RUN_DIR, ".cancel"));
+        if (cancelled()) throw new Error("Run stopped by user.");
+        const cancelTimer = RUN_DIR ? setInterval(() => {
+          if (cancelled()) void this.executor.currentPage.context().close().catch(() => {});
+        }, 150) : undefined;
+        cancelTimer?.unref();
+        const stopScreen = RUN_DIR ? startLiveScreen(() => this.executor.currentPage, frame => emit("FRAME", { ...frame, index })) : async () => {};
+        try { await this.executor.execute(step); } finally { clearInterval(cancelTimer); await stopScreen(); }
 
         const screenshot =
           await this.captureStep(index);
