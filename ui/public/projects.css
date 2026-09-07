@@ -44,7 +44,9 @@
 #workspace .step-head { display: flex; flex-wrap: wrap; gap: 5px; padding: 9px 8px; }
 #workspace .step-head select { flex: 1 1 145px; width: 145px; min-width: 0; font-size: 12px; padding: 5px; }
 #workspace .step-head .step-index { font-size: 11px; width: 22px; }
-#workspace .step-head .step-desc { display: none; }
+/* The description used to repeat the action's generic meaning, which was
+   noise. It now says what this step actually does, so it earns its place. */
+#workspace .step-head .step-desc { display: block; }
 #workspace .step-tools { margin-left: auto; gap: 2px; }
 #workspace .step-tools .btn-icon { width: 22px; height: 24px; font-size: 12px; }
 #workspace .step-expand { width: 20px; height: 24px; }
@@ -132,3 +134,46 @@
    grew past the row and out of the window. Stretch them to the row instead. */
 #workspace .panes,
 #suite-workspace .panes { align-items: stretch; }
+
+/* Status lives on the step you author, so the run panel does not need a second
+   copy of the list rendered as chips beside the screen. */
+#workspace .run-steps { display: none; }
+#workspace .run-split { grid-template-columns: 1fr; }
+
+/* Outcome markers on the step editor. */
+.step-status {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  background: var(--skip);
+}
+.step-status.status-passed { background: var(--pass); }
+.step-status.status-failed { background: var(--fail); }
+.step-status.status-running { background: var(--run); animation: pulse 1s ease-in-out infinite; }
+.step-status.status-skipped { background: var(--skip); }
+.step-status.status-pending { background: transparent; border: 1.5px solid var(--border); color: var(--muted); }
+
+.step-card.run-failed { border-color: var(--fail); box-shadow: 0 0 0 1px var(--fail-soft); }
+.step-card.run-running { border-color: var(--run); }
+.step-card.run-selected { box-shadow: 0 0 0 2px var(--accent-soft); }
+.step-card.run-skipped .step-head { opacity: .62; }
+
+/* The description carries the meaning of the step, so let it breathe. */
+#workspace .step-head .step-desc {
+  display: block;
+  flex-basis: 100%;
+  order: 10;
+  white-space: normal;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 2px 2px 0 30px;
+}
+#workspace .step-head { flex-wrap: wrap; }

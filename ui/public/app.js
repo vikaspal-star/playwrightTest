@@ -728,6 +728,8 @@
       container.append(el("div", { class: "muted", text: "No steps. Add one to get started." }));
     }
     steps.forEach((step, i) => container.append(stepCard(step, i)));
+    // The editor was just rebuilt; put the last run's outcome back on it.
+    if (testPanel.run) applyRunStatusToEditor(testPanel, testPanel.run);
   }
 
   function actionSelect(current) {
@@ -1080,12 +1082,52 @@
       );
     }
 
+    applyRunStatusToEditor(panel, run);
+
     const pre = pel(panel, "runLog");
     pre.textContent = run.log.join("\n");
     pre.scrollTop = pre.scrollHeight;
 
     renderViewer(panel);
     void loadRunReport(panel);
+  }
+
+  // Mark the step editor with what happened on the last run, so the list you
+  // author in is the same list you read results from. Only meaningful for a
+  // single test: a suite run's steps come from several files.
+  function applyRunStatusToEditor(panel, run) {
+    const cards = [...document.querySelectorAll("#steps .step-card")];
+    if (!cards.length) return;
+
+    const applies = panel === testPanel && (run.kind ?? "test") === "test";
+    for (const card of cards) {
+      card.classList.remove("run-passed", "run-failed", "run-running", "run-skipped", "run-selected");
+      const badge = card.querySelector(".step-status");
+      if (badge) badge.remove();
+    }
+    if (!applies) return;
+
+    cards.forEach((card, index) => {
+      const step = run.steps[index];
+      if (!step) return;
+      card.classList.add(`run-${step.status}`);
+      if (panel.selectedStep === step.index) card.classList.add("run-selected");
+
+      const head = card.querySelector(".step-head");
+      if (!head) return;
+      const badge = el("button", {
+        class: `step-status status-${step.status}`,
+        title: `${step.status}${step.durationMs !== undefined ? ` in ${fmtMs(step.durationMs)}` : ""} — click to see this step`,
+        "aria-label": `Step ${step.index} ${step.status}. Show its screenshot.`,
+        onclick: event => {
+          event.stopPropagation();
+          panel.follow = false;
+          panel.selectedStep = step.index;
+          renderRun(panel);
+        }
+      }, ICONS[step.status] || "");
+      head.insertBefore(badge, head.firstChild);
+    });
   }
 
   function renderViewer(panel) {
