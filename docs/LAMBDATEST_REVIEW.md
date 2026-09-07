@@ -1,5 +1,7 @@
 # LambdaTest Agent Testing review and MMQA upgrade
 
+The later Automation dashboard review and run-detail upgrade are documented in [Run evidence upgrade](RUN_EVIDENCE_UPGRADE.md), covering every tab in the user's shared Automation run.
+
 Reviewed 2026-09-07. Local `feat/test-studio` and the remote branch both started at `15dbf01`. Existing Projects, environments, embedded recording, departments and usage metering were retained. The missing `src/liveScreen.ts` dependency is included in the upgrade so a fresh checkout can start the current server.
 
 ## What was reviewed

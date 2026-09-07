@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { validateTest } from "./validation";
 import { startLiveScreen } from "./liveScreen";
+import { RunDiagnostics, captureOptions } from "./runDiagnostics";
 
 import {
   Page
@@ -53,6 +54,7 @@ function emit(
 export class JsonRunner {
 
   private executor: ActionExecutor;
+  private diagnostics?: RunDiagnostics;
 
 
   constructor(
@@ -68,6 +70,15 @@ export class JsonRunner {
   async run(
     jsonPath: string
   ): Promise<void> {
+    if (RUN_DIR) this.diagnostics = new RunDiagnostics(this.page.context(), RUN_DIR, captureOptions(JSON.parse(process.env.RUN_CAPTURE || "{}")));
+    try { await this.runSteps(jsonPath); }
+    finally {
+      try { await this.diagnostics?.audit(this.executor.currentPage, path.basename(jsonPath)); }
+      finally { this.diagnostics?.finish(); }
+    }
+  }
+
+  private async runSteps(jsonPath: string): Promise<void> {
 
     console.log("");
     console.log(
@@ -162,6 +173,7 @@ export class JsonRunner {
         testCase.steps[i];
 
       const index = i + 1;
+      this.diagnostics?.beginStep(index);
 
       const startedAt = Date.now();
 
@@ -253,6 +265,7 @@ export class JsonRunner {
     if (!RUN_DIR) {
       return undefined;
     }
+    await this.diagnostics?.afterStep(this.executor.currentPage);
 
     const file = `step-${index}.png`;
 

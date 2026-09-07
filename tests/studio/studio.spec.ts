@@ -1,6 +1,7 @@
 import { test, expect, APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
+import http from "node:http";
 
 let admin: APIRequestContext;
 let member: APIRequestContext;
@@ -40,7 +41,7 @@ test("restricted tests protect suites, run details, events, screenshots, reports
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "run.json"), JSON.stringify(record));
   fs.writeFileSync(path.join(dir, "step-1.png"), "private artifact");
-  for (const route of ["/api/tests/private.json", "/api/suites/private-suite.json", "/api/runs/private-run", "/api/runs/private-run/events", "/api/runs/private-run/report", "/runs/private-run/step-1.png", "/api/knowledge/private.json"]) {
+  for (const route of ["/api/tests/private.json", "/api/suites/private-suite.json", "/api/runs/private-run", "/api/runs/private-run/events", "/api/runs/private-run/report", "/api/runs/private-run/evidence", "/api/runs/private-run/evidence?download=1", "/runs/private-run/media/abcd.webm", "/runs/private-run/step-1.png", "/api/knowledge/private.json"]) {
     expect((await member.get(route)).status(), route).toBe(404);
   }
   expect(await (await member.get("/api/runs")).json()).toEqual([]);
@@ -71,6 +72,99 @@ test("single tests produce isolated reports and suite sessions carry between tes
   expect((await admin.post("/api/suites", { data: { file: "session-suite", tests: ["session-first.json", "session-second.json"] } })).status()).toBe(201);
   const suite = await (await admin.post("/api/suites/session-suite.json/run")).json();
   await expect.poll(async () => (await (await admin.get(`/api/runs/${suite.id}`)).json()).status, { timeout: 30000 }).toBe("passed");
+  const suiteEvidence = await (await admin.get(`/api/runs/${suite.id}/evidence`)).json();
+  expect(suiteEvidence.videos).toHaveLength(1);
+  expect(suiteEvidence.diagnostics.network.length).toBeGreaterThan(0);
+  expect(suiteEvidence.diagnostics.performance.some((row: any) => row.step === 3)).toBeTruthy();
+});
+
+test("run inspector shows real diagnostics, video, comparisons and advisory accessibility with protected exports", async ({ page }) => {
+  test.setTimeout(120000);
+  const fixture = http.createServer((req, res) => {
+    if (req.url?.startsWith("/broken")) { res.writeHead(503, { "Content-Type": "text/plain" }); res.end("BODY_SECRET"); return; }
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end('<!doctype html><html lang="en"><title>Evidence fixture</title><main><h1>Diagnostic fixture</h1><button id="unlabelled"></button></main><script>console.warn("fixture warning password=LOG_SECRET");fetch("/broken?token=QUERY_SECRET",{headers:{Authorization:"HEADER_SECRET"}});setTimeout(()=>{throw new Error("fixture page error")},30)</script></html>');
+  });
+  await new Promise<void>(resolve => fixture.listen(0, "127.0.0.1", resolve));
+  const address = fixture.address() as import("node:net").AddressInfo;
+  const url = `http://127.0.0.1:${address.port}`;
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  try {
+    expect((await admin.post("/api/tests", { data: { file: "diagnostic-fixture", name: "Diagnostic fixture", steps: [{ action: "navigate", url }, { action: "wait", timeout: 350 }] } })).status()).toBe(201);
+    expect((await admin.post("/api/tests/diagnostic-fixture.json/run", { data: { capture: { video: "yes" } } })).status()).toBe(400);
+    const first = await (await admin.post("/api/tests/diagnostic-fixture.json/run", { data: { capture: { video: true, accessibility: true } } })).json();
+    await expect.poll(async () => (await (await admin.get(`/api/runs/${first.id}`)).json()).status, { timeout: 60000 }).toBe("passed");
+    const evidence = await (await admin.get(`/api/runs/${first.id}/evidence`)).json();
+    expect(evidence.diagnostics.configuration.browser).toBe("chromium");
+    expect(evidence.diagnostics.console.some((row: any) => row.level === "pageerror" && row.text.includes("fixture page error"))).toBeTruthy();
+    expect(evidence.diagnostics.network.some((row: any) => row.status === 503 && row.url === `${url}/broken` && row.durationMs >= 0)).toBeTruthy();
+    expect(evidence.diagnostics.performance.length).toBeGreaterThan(0);
+    for (const secret of ["BODY_SECRET", "HEADER_SECRET", "QUERY_SECRET", "LOG_SECRET"]) expect(JSON.stringify(evidence.diagnostics)).not.toContain(secret);
+    expect(evidence.diagnostics.accessibility[0].status).toBe("complete");
+    expect(evidence.diagnostics.accessibility[0].violations.some((row: any) => row.id === "button-name")).toBeTruthy();
+    expect(evidence.videos).toHaveLength(1);
+    const video = await admin.get(`/runs/${first.id}/${evidence.videos[0]}`, { headers: { Range: "bytes=0-99" } });
+    expect(video.status()).toBe(206); expect(video.headers()["content-type"]).toContain("video/webm");
+    expect((await admin.get(`/runs/${first.id}/diagnostics.json`)).status()).toBe(404);
+    expect(evidence.run.sourceAccess).toBeUndefined();
+    const downloaded = await admin.get(`/api/runs/${first.id}/evidence?download=1`);
+    expect(downloaded.headers()["content-disposition"]).toContain("attachment;");
+    expect((await admin.put("/api/tests/diagnostic-fixture.json/sharing", { data: { visibility: "restricted", sharedWith: [] } })).ok()).toBeTruthy();
+    expect((await member.get(`/api/runs/${first.id}/evidence`)).status()).toBe(404);
+    expect((await member.get(`/runs/${first.id}/${evidence.videos[0]}`)).status()).toBe(404);
+    const second = await (await admin.post("/api/tests/diagnostic-fixture.json/run", { data: { capture: { video: false, accessibility: false } } })).json();
+    await expect.poll(async () => (await (await admin.get(`/api/runs/${second.id}`)).json()).status, { timeout: 45000 }).toBe("passed");
+    expect((await (await admin.get(`/api/runs/${second.id}/evidence`)).json()).videos).toEqual([]);
+    await page.goto("/");
+    await page.locator("#login-form").getByLabel("Username", { exact: true }).fill("owner");
+    await page.locator("#login-form").getByLabel("Password", { exact: true }).fill(password);
+    await page.getByRole("button", { name: "Log in", exact: true }).click();
+    await page.goto("/#diagnostic-fixture.json");
+    await page.getByRole("button", { name: "Inspect run", exact: true }).click();
+    const inspector = page.getByRole("dialog", { name: "Diagnostic fixture", exact: true });
+    await expect(inspector.getByRole("tab", { name: "Commands", exact: true })).toBeVisible();
+    await inspector.getByRole("tab", { name: "Network", exact: true }).click();
+    await inspector.getByLabel("Network status", { exact: true }).selectOption("failed");
+    await expect(inspector.locator("tbody")).toContainText("503");
+    await page.screenshot({ path: "test-results/run-inspector-network.png", fullPage: true });
+    await inspector.getByRole("tab", { name: "Logs", exact: true }).click();
+    await inspector.getByLabel("Log level", { exact: true }).selectOption("error");
+    await expect(inspector.locator(".inspector-log")).toContainText("fixture page error");
+    await inspector.getByRole("tab", { name: "Metadata", exact: true }).click();
+    await expect(inspector).toContainText("chromium");
+    await inspector.getByRole("tab", { name: "Performance", exact: true }).click();
+    await expect(inspector).toContainText("Page navigation samples");
+    await inspector.getByRole("tab", { name: "Visual comparison", exact: true }).click();
+    await expect(inspector.locator(".inspector-comparison img")).toHaveCount(2);
+    await inspector.getByRole("tab", { name: "Accessibility", exact: true }).click();
+    await expect(inspector).toContainText("Enable Accessibility checks");
+    await inspector.getByRole("tab", { name: "Video & screenshots", exact: true }).click();
+    await expect(inspector).toContainText("Video recording was disabled");
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await inspector.evaluate(element => element.scrollWidth <= element.clientWidth)).toBeTruthy();
+    await page.screenshot({ path: "test-results/run-inspector-mobile.png", fullPage: true });
+    await inspector.getByRole("button", { name: "Close run details", exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.locator('.tab[data-tab="reports"]').click();
+    await page.getByRole("tab", { name: "Run history & evidence", exact: true }).click();
+    await page.getByLabel("Search run history", { exact: true }).fill(first.id);
+    await page.locator(".inspector-history-row").click();
+    await inspector.getByRole("tab", { name: "Accessibility", exact: true }).click();
+    await expect(inspector).toContainText("button-name");
+    await inspector.getByRole("tab", { name: "Video & screenshots", exact: true }).click();
+    await expect(inspector.locator("video")).toBeVisible();
+    await expect.poll(() => inspector.locator("video").evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThan(0);
+    await inspector.locator("video").evaluate((video: HTMLVideoElement) => { video.muted = true; return video.play(); });
+    await expect.poll(() => inspector.locator("video").evaluate((video: HTMLVideoElement) => video.currentTime)).toBeGreaterThan(0.2);
+    await inspector.locator("video").evaluate((video: HTMLVideoElement) => video.pause());
+    await page.screenshot({ path: "test-results/run-inspector-video.png", fullPage: true });
+    await inspector.getByRole("button", { name: "Close run details", exact: true }).click();
+    await page.locator('.tab[data-tab="settings"]').click();
+    await page.getByLabel("Accessibility checks · WCAG 2.1 A/AA", { exact: true }).check();
+    await page.reload();
+    await expect(page.getByLabel("Accessibility checks · WCAG 2.1 A/AA", { exact: true })).toBeChecked();
+    expect(errors).toEqual([]);
+  } finally { await new Promise<void>(resolve => fixture.close(() => resolve())); }
 });
 
 test("recordings are owned and cannot bypass the test editing feature", async () => {

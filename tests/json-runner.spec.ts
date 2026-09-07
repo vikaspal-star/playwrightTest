@@ -1,5 +1,5 @@
 import {
-  test
+  test, devices
 } from "@playwright/test";
 
 import fs from "fs";
@@ -39,7 +39,7 @@ for (const jsonFile of jsonFiles) {
 
   test(
     `Installation: ${jsonFile}`,
-    async ({ page }) => {
+    async ({ page, browser }) => {
 
       const jsonPath =
         path.join(
@@ -47,12 +47,11 @@ for (const jsonFile of jsonFiles) {
           jsonFile
         );
 
-      const runner =
-        new JsonRunner(page);
-
-      await runner.run(
-        jsonPath
-      );
+      // Studio retains successful-run video too. Plain CLI behavior is unchanged.
+      const capture = JSON.parse(process.env.RUN_CAPTURE || "{}");
+      const context = process.env.RUN_DIR ? await browser.newContext({ ...devices["Desktop Chrome"], ...(capture.video !== false ? { recordVideo: { dir: path.join(process.env.RUN_DIR, "media"), size: { width: 1280, height: 720 } } } : {}) }) : null;
+      try { await new JsonRunner(context ? await context.newPage() : page).run(jsonPath); }
+      finally { await context?.close(); }
     }
   );
 

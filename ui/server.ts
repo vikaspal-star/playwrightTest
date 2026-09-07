@@ -58,6 +58,7 @@ import { AnalysisResult, analyzeFailure, analyzeRun, analyzeAdaptation, isConfig
 import * as aiUsage from "./aiUsage";
 import { agentTestingRouter } from "./agentTestingRoutes";
 import { listRequirements, saveRequirements, newRequirement, requirementInput } from "./requirements";
+import { RunDiagnostics, captureOptions, CaptureOptions, Diagnostics } from "../src/runDiagnostics";
 import { ROOT, WORKSPACE, JSON_DIR, SUITES_DIR, RUNS_DIR, DATA_DIR, HOST, PORT, MAX_ACTIVE_RUNS, RUN_TIMEOUT_MS } from "./config";
 import { readJson, writeJson, acquireWorkspaceLock } from "./storage";
 import { validateTest, ValidationError } from "../src/validation";
@@ -110,6 +111,8 @@ interface RunRecord {
   testFiles?: string[];
   error?: string;
   sourceAccess?: Record<string, TestMeta>;
+  capture?: CaptureOptions;
+  projectContext?: { file: string; project: string; environment: string }[];
 }
 
 interface ActiveRun {
@@ -556,7 +559,12 @@ function broadcast(run: ActiveRun, event: string, data: unknown): void {
 // Single-test run orchestration (spawns the Playwright CLI, as before)
 // ------------------------------------------------------------
 
-function startRun(file: string, startedBy: string): RunRecord {
+function runProjectContext(files: string[]) {
+  const store = projectStore();
+  return files.map(file => { const assignment = store.assignments[file]; const project = store.projects.find(p => p.id === assignment?.projectId); return { file, project: project?.name || "Unassigned", environment: project?.environments.find(e => e.id === assignment?.environmentId)?.name || "Unassigned" }; });
+}
+
+function startRun(file: string, startedBy: string, capture: CaptureOptions): RunRecord {
   const test = { ...readTest(file), ...validateTest(readTest(file), true) };
   assertRunCapacity();
   if (isRunning("test", file)) throw new HttpError(409, `${file} is already running`);
@@ -573,6 +581,7 @@ function startRun(file: string, startedBy: string): RunRecord {
     file,
     name: test.name || file,
     kind: "test",
+    capture, projectContext: runProjectContext([file]),
     status: "running",
     startedAt: new Date().toISOString(),
     startedBy,
@@ -601,6 +610,7 @@ function startRun(file: string, startedBy: string): RunRecord {
       env: {
         ...process.env,
         RUN_DIR: dir,
+        RUN_CAPTURE: JSON.stringify(capture),
         TEST_JSON_DIR: inputDir,
         PLAYWRIGHT_HTML_OUTPUT_DIR: path.join(dir, "report"),
         FORCE_COLOR: "0",
@@ -775,7 +785,7 @@ function notifyRunFinished(record: RunRecord): void {
 // across every test in the suite, so login/session state carries over)
 // ------------------------------------------------------------
 
-function startSuiteRun(file: string, user: PublicUser): RunRecord {
+function startSuiteRun(file: string, user: PublicUser, capture: CaptureOptions): RunRecord {
   const suite = readSuite(file);
   assertRunCapacity();
   if (isRunning("suite", file)) throw new HttpError(409, `${file} is already running`);
@@ -814,6 +824,7 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
     file,
     name: suite.name || file,
     kind: "suite",
+    capture, projectContext: runProjectContext(suite.tests),
     status: "running",
     startedAt: new Date().toISOString(),
     startedBy: user.username,
@@ -857,12 +868,15 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
     let anyFailure = false;
     let haltSuite = false;
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+    let context: import("playwright").BrowserContext | undefined;
+    let diagnostics: RunDiagnostics | undefined;
 
     try {
       browser = await chromium.launch({ headless: true });
       closeBrowser = () => browser!.close();
       if (aborted) throw new Error(record.error || "Suite stopped.");
-      const context = await browser.newContext({ ...devices["Desktop Chrome"] });
+      context = await browser.newContext({ ...devices["Desktop Chrome"], ...(capture.video ? { recordVideo: { dir: path.join(dir, "media"), size: { width: 1280, height: 720 } } } : {}) });
+      diagnostics = new RunDiagnostics(context, dir, capture);
       context.setDefaultTimeout(30000);
       context.setDefaultNavigationTimeout(60000);
       const page = await context.newPage();
@@ -890,6 +904,7 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
           }
 
           step.status = "running";
+          diagnostics.beginStep(step.index);
           broadcast(active, "step", step);
           log("");
           log(`STEP ${step.index}/${steps.length}`);
@@ -911,7 +926,7 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
             if (!suite.continueOnFailure) haltSuite = true;
             log(`✗ Step ${step.index} Failed`);
             log(step.error);
-          } finally { await stopScreen(); }
+          } finally { await stopScreen(); await diagnostics.afterStep(executor.currentPage); }
 
           try {
             fs.mkdirSync(dir, { recursive: true });
@@ -923,12 +938,15 @@ function startSuiteRun(file: string, user: PublicUser): RunRecord {
 
           broadcast(active, "step", step);
         }
+        if (!aborted && record.steps.some(step => step.testFile === t.file && ["passed", "failed"].includes(step.status))) await diagnostics.audit(executor.currentPage, t.file);
       }
     } catch (e) {
       anyFailure = true;
       record.error ??= e instanceof Error ? e.message : String(e);
       log(`Suite aborted: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
+      diagnostics?.finish();
+      if (context) await context.close().catch(() => {});
       if (browser) await browser.close().catch(() => {});
       clearTimeout(deadline);
     }
@@ -1458,7 +1476,7 @@ app.post("/api/tests/:file/run", (req, res) => {
   const user = requireFeature(req, "tests.run");
   const file = safeFile(req.params.file);
   if (resolveAccess(getTestMeta(file), user) === null) throw new HttpError(404, `Test not found: ${file}`);
-  res.status(202).json(summary(startRun(file, user.username)));
+  res.status(202).json(summary(startRun(file, user.username, captureOptions(req.body?.capture))));
 });
 
 // ---- Suites ----
@@ -1548,7 +1566,7 @@ app.delete("/api/suites/:file", (req, res) => {
 
 app.post("/api/suites/:file/run", (req, res) => {
   const user = requireFeature(req, "suites.run");
-  res.status(202).json(summary(startSuiteRun(req.params.file, user)));
+  res.status(202).json(summary(startSuiteRun(req.params.file, user, captureOptions(req.body?.capture))));
 });
 
 // ---- Runs ----
@@ -1563,6 +1581,20 @@ app.get("/api/runs", (req, res) => {
 app.get("/api/runs/:id", (req, res) => {
   const rec = requireRun(req);
   res.json(rec);
+});
+
+app.get("/api/runs/:id/evidence", (req, res) => {
+  const run = requireRun(req);
+  const dir = path.join(RUNS_DIR, run.id);
+  const diagnosticPath = path.join(dir, "diagnostics.json");
+  const diagnostics = fs.existsSync(diagnosticPath) ? readJson<Diagnostics | null>(diagnosticPath, null) : null;
+  const media = path.join(dir, "media");
+  const videos = run.status !== "running" && fs.existsSync(media) ? fs.readdirSync(media).filter(file => /^(?:page@)?[a-f0-9-]+\.webm$/.test(file) && diagnostics?.videos?.includes(`media/${file}`)).slice(0, 20).map(file => `media/${file}`) : [];
+  // Do not export sharing grants or input snapshots (which can contain passwords).
+  const { sourceAccess: _access, ...publicRun } = run;
+  const evidence = { run: publicRun, diagnostics, videos };
+  if (req.query.download === "1") res.attachment(`mmqa-${run.id}.json`);
+  res.json(evidence);
 });
 
 app.post("/api/runs/:id/stop", (req, res) => {
@@ -1990,7 +2022,7 @@ app.post("/api/runs/:id/steps/:index/analyze", async (req, res) => {
 app.use("/runs/:id", (req, res, next) => {
   const record = requireRun(req);
   // Input snapshots, logs and arbitrary host files are never static assets.
-  if (!/^\/step-\d+\.png$/.test(req.path) && !/^\/report(?:\/|$)/.test(req.path)) throw new HttpError(404, "Artifact not found");
+  if (!/^\/step-\d+\.png$/.test(req.path) && !/^\/media\/(?:page(?:@|%40))?[a-f0-9-]+\.webm$/.test(req.path) && !/^\/report(?:\/|$)/.test(req.path)) throw new HttpError(404, "Artifact not found");
   express.static(path.join(RUNS_DIR, record.id), { fallthrough: false })(req, res, next);
 });
 app.use("/report", (req, _res, next) => { requireAdmin(req); requireFeature(req, "reports.view"); next(); }, express.static(path.join(WORKSPACE, "playwright-report")));

@@ -1163,6 +1163,7 @@
       el("span", { text: `${passedCount}/${run.steps.length} steps` }),
       el("span", { text: running ? `started ${fmtRelative(run.startedAt)}` : fmtMs(run.durationMs), title: fmtTime(run.startedAt) }),
       run.startedBy ? el("span", { text: `by ${run.startedBy}` }) : null,
+      el("button", { class: "btn-link", text: "Inspect run", onclick: () => window.RunInspector.open(run.id) }),
       run.error ? el("span", { class: "validation-message", text: run.error }) : null,
       !running && run.kind !== "suite" ? el("a", { href: `/runs/${encodeURIComponent(run.id)}/report/index.html`, target: "_blank", rel: "noopener", text: "HTML report ↗" }) : null
     ].filter(Boolean));
@@ -1623,7 +1624,7 @@
       if (!ok) return;
     }
     try {
-      const rec = await api(`/api/tests/${encodeURIComponent(state.file)}/run`, { method: "POST" });
+      const rec = await api(`/api/tests/${encodeURIComponent(state.file)}/run`, { method: "POST", body: JSON.stringify({ capture: window.RunInspector.options() }) });
       attachRun(testPanel, rec.id, { live: true });
       await loadTests();
     } catch (e) {
@@ -1849,7 +1850,7 @@
       if (!ok) return;
     }
     try {
-      const rec = await api(`/api/suites/${encodeURIComponent(state.suiteFile)}/run`, { method: "POST" });
+      const rec = await api(`/api/suites/${encodeURIComponent(state.suiteFile)}/run`, { method: "POST", body: JSON.stringify({ capture: window.RunInspector.options() }) });
       attachRun(suitePanel, rec.id, { live: true });
       await loadSuites();
     } catch (e) {
@@ -1879,6 +1880,7 @@
   }
 
   async function loadReport() {
+    if (!$("report-history-body").hidden) void window.RunInspector.history($("report-run-history"));
     if (!can("reports.view")) {
       $("report-cards").replaceChildren(el("div", { class: "muted", text: "You do not have access to reports." }));
       return;
@@ -1904,7 +1906,7 @@
   function renderReport() {
     const r = state.report;
     if (!r) return;
-    $("report-range-label").textContent = `last ${r.days} days · generated ${fmtRelative(r.generatedAt)}`;
+    $("report-range-label").textContent = $("report-history-body").hidden ? `last ${r.days} days · generated ${fmtRelative(r.generatedAt)}` : "All saved browser test and suite runs";
 
     $("report-cards").replaceChildren(
       statCard("Runs", String(r.totals.runs), `${r.totals.running} running now`),
@@ -3116,6 +3118,10 @@
   }
 
   async function init() {
+    window.RunInspector.init({ api, el, toast });
+    const reportTabs = [...document.querySelectorAll("[data-report-tab]")];
+    const selectReportTab = key => { reportTabs.forEach(button => { const selected = button.dataset.reportTab === key; button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1; $(`report-${button.dataset.reportTab}-body`).hidden = !selected; }); $("report-days").hidden = key === "history"; document.querySelector('label[for="report-days"]').hidden = key === "history"; renderReport(); if (key === "history") void window.RunInspector.history($("report-run-history")); };
+    reportTabs.forEach((button, index) => { button.onclick = () => selectReportTab(button.dataset.reportTab); button.onkeydown = event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? reportTabs.length - 1 : (index + 1) % reportTabs.length; selectReportTab(reportTabs[next].dataset.reportTab); reportTabs[next].focus(); }; });
     $("nav-agents").hidden = !can("agents.manage");
     window.addEventListener("beforeunload", event => { if (window.AgentTesting.isDirty()) { event.preventDefault(); event.returnValue = ""; } });
     $("btn-telemetry").addEventListener("click", () => { $("account-menu").open = false; switchTab("settings"); });

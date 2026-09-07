@@ -162,6 +162,8 @@ The limit blocks new calls once recorded usage reaches it. It does not reserve t
 
 ## Project workspace
 
+**Run evidence:** Open **Inspect run** on a browser test/suite or use **Reports → Run history & evidence** for commands, searchable logs, network failures, video, metadata, timing, visual comparison and optional accessibility findings. Configure captures in **Settings → Run evidence**; AI usage remains under **Telemetry**. See [the LambdaTest Automation review and capture limits](docs/RUN_EVIDENCE_UPGRADE.md).
+
 Projects now open in three tabs: **Test cases**, **Requirements**, and **Suites**, each showing its count. The project header remains visible while the selected content scrolls. Add acceptance criteria in Requirements and link the test cases that verify them. See [the project workflow](docs/PROJECTS_UPGRADE.md) for access, storage and navigation details.
 
 ## Agent Testing: manual, API and optional AI

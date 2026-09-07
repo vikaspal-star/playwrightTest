@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="studio.css">
   <link rel="stylesheet" href="agent-testing.css">
   <link rel="stylesheet" href="projects.css">
+  <link rel="stylesheet" href="run-inspector.css">
 </head>
 <body>
 
@@ -211,7 +212,8 @@
 
     <section id="agents-panel" class="page-content" hidden aria-label="Agent Testing"></section>
     <section id="settings-panel" class="page-content" hidden aria-labelledby="settings-title">
-      <div class="page-heading"><div><span class="eyebrow">WORKSPACE SETTINGS</span><h1 id="settings-title">Settings</h1><p>Monitor AI activity and token consumption.</p></div></div>
+      <div class="page-heading"><div><span class="eyebrow">WORKSPACE SETTINGS</span><h1 id="settings-title">Settings</h1><p>Choose run evidence and monitor AI token consumption.</p></div></div>
+      <div class="surface agent-card capture-settings"><h2>Run evidence</h2><p class="agent-muted">Preferences for new browser test and suite runs started from this browser.</p><label><input type="checkbox" id="capture-video" checked>Record video for passed and failed runs</label><label><input type="checkbox" id="capture-accessibility">Accessibility checks · WCAG 2.1 A/AA</label><p class="agent-muted">Commands, screenshots, browser console, network metadata, and navigation timings are captured automatically. Video records visible page content. Accessibility scans add time and report advisory findings. These captures use no AI tokens.</p></div>
       <div class="surface agent-card"><div class="agent-section-heading"><div><h2>Telemetry · AI usage</h2><p class="agent-muted">Reported tokens, estimated spend, and the features using them.</p></div><div class="agent-actions"><label class="agent-field">Period<select id="telemetry-days"><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option></select></label><button class="btn" id="telemetry-refresh">Refresh</button></div></div><div id="settings-telemetry" aria-live="polite"></div></div>
     </section>
     <div id="empty" class="empty page-content">
@@ -359,7 +361,8 @@
         </div>
         <div id="reports-panel" class="report-controls"><label for="report-days">Period</label><select id="report-days"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option></select><button id="btn-refresh-report" class="btn">Refresh</button></div>
       </header>
-      <div class="report-body">
+      <div class="inspector-tabs report-tabs" role="tablist" aria-label="Report sections"><button id="report-summary-tab" role="tab" aria-selected="true" aria-controls="report-summary-body" data-report-tab="summary">Summary</button><button id="report-history-tab" role="tab" aria-selected="false" aria-controls="report-history-body" data-report-tab="history" tabindex="-1">Run history &amp; evidence</button></div>
+      <div id="report-summary-body" class="report-body" role="tabpanel" aria-labelledby="report-summary-tab">
         <div id="report-cards" class="report-cards"></div>
         <section class="pane report-pane">
           <div class="pane-head"><h2>Runs per day</h2></div>
@@ -394,6 +397,7 @@
           <ul id="report-failures" class="report-failures"></ul>
         </section>
       </div>
+      <div id="report-history-body" class="report-history-body" role="tabpanel" aria-labelledby="report-history-tab" hidden><div class="surface report-evidence-panel"><h2>Run history</h2><p class="muted">All accessible browser test and suite runs. Open any run to inspect its evidence.</p><div id="report-run-history"></div></div></div>
     </div>
 
     <div id="suite-workspace" class="workspace" hidden>
@@ -511,6 +515,7 @@
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script src="agent-testing.js"></script>
+<script src="run-inspector.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
