@@ -275,3 +275,4 @@
   #environment-list { padding:10px; gap:10px; }#environment-list > label { width:100%; }#environment-list select { flex:1; min-width:0; }#environment-list .page-actions { margin-left:0; }.project-endpoint { max-width:100%; }
   .requirement-summary { gap:12px; font-size:12px; padding:12px; }.requirement-row { padding:16px; gap:12px; }.requirement-state { max-width:85px; }
 }
+.settings-account{margin-bottom:24px}

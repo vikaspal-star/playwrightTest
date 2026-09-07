@@ -522,6 +522,9 @@
     const container = $("project-requirements-content"), project = selectedProject();
     container.replaceChildren();
     if (!project) return;
+    const documentList = el("section", { class: "surface project-documents", "aria-label": "Project documents" });
+    container.append(documentList);
+    window.ProjectDocuments.mount(documentList, project);
     const rows = state.requirements[project.id];
     if (state.requirementErrors[project.id]) {
       container.append(el("p", { role: "alert", class: "agent-error", text: state.requirementErrors[project.id] }), el("button", { class: "btn", text: "Retry requirements", onclick: () => loadRequirements(project.id) })); return;
@@ -537,7 +540,9 @@
       list.replaceChildren();
       for (const row of matches) list.append(el("article", { class: "requirement-row" },
         el("div", { class: "requirement-main" }, el("button", { class: "requirement-title", text: row.title, onclick: () => requirementForm(row) }), el("p", { class: "requirement-description", text: row.description || "No details added yet." }),
-          el("div", { class: "requirement-links" }, links(row).length ? links(row).map(file => el("button", { class: "btn-link", text: projectTests.find(t => t.file === file)?.name || file, onclick: () => openTest(file) })) : el("span", { class: "muted", text: "No linked test cases" }))),
+          el("div", { class: "requirement-links" }, links(row).length ? links(row).map(file => el("button", { class: "btn-link", text: projectTests.find(t => t.file === file)?.name || file, onclick: () => openTest(file) })) : el("span", { class: "muted", text: "No linked test cases" })),
+          el("div", { class: "agent-actions" }, row.source ? el("button", { class: "btn-link", text: `Source · ${row.source.name}`, onclick: () => window.ProjectDocuments.source(row.source) }) : null,
+            can("folders.manage") && can("tests.create") && !row.tests.includes(`requirement-${row.id}.json`) ? el("button", { class: "btn-link", text: "Create test draft", onclick: () => window.ProjectDocuments.createTest(project, row) }) : null)),
         el("div", { class: "requirement-state" }, el("span", { class: `badge ${row.status === "approved" ? "passed" : "none"}`, text: row.status }), el("small", { class: "muted", text: `${links(row).length} linked tests` }), can("folders.manage") ? el("button", { class: "btn-link danger-text", "aria-label": `Delete requirement ${row.title}`, text: "Delete", onclick: async () => {
           if (!await confirmDialog(`Delete the requirement “${row.title}”? Linked test cases will remain available.`, { title: "Delete requirement", okLabel: "Delete requirement", danger: true })) return;
           try { await api(`/api/projects/${project.id}/requirements/${row.id}`, { method: "DELETE", body: JSON.stringify({ revision: row.revision }) }); await loadRequirements(project.id); toast("Requirement deleted", "ok"); } catch (error) { toast(error.message, "error"); }
@@ -693,6 +698,7 @@
 
     renderTestMeta();
     applyAccessMode();
+    renderTestDesign();
     renderSteps();
     renderTestList();
 
@@ -702,13 +708,20 @@
     await loadHistory(testPanel, { autoOpenLatest: true });
   }
 
+  function renderTestDesign() {
+    $("test-design").hidden = !state.test?.design;
+    $("test-design-content").replaceChildren();
+    if (state.test?.design) $("test-design-content").append(window.ProjectDocuments.designFields(state.test.design, can("tests.edit") && state.test.access === "edit", () => setDirty(true)));
+  }
+
   async function saveTest() {
     if (!state.file || !can("tests.edit") || state.test.access !== "edit") return false;
     $("test-validation").hidden = true;
     const body = {
       name: $("test-name").value,
       description: $("test-description").value,
-      steps: state.test.steps
+      steps: state.test.steps,
+      design: state.test.design
     };
     try {
       state.test = await api(`/api/tests/${encodeURIComponent(state.file)}`, {
@@ -716,6 +729,7 @@
         body: JSON.stringify(body)
       });
       setDirty(false);
+      renderTestDesign();
       renderSteps();
       renderTestMeta();
       await loadTests();
@@ -2021,7 +2035,7 @@
     const s = data.summary;
     container.replaceChildren();
 
-    container.append(el("p", { class: "agent-notice", text: `${data.scope === "workspace" ? "Workspace usage" : "Your usage"} · ${data.configured ? "AI provider configured" : "AI provider not configured"}. Includes scenario generation, adaptive personas, rubric evaluation and test analysis. No conversation content is shown here.` }));
+    container.append(el("p", { class: "agent-notice", text: `${data.scope === "workspace" ? "Workspace usage" : "Your usage"} · ${data.configured ? "AI provider configured" : "AI provider not configured"}. Includes document requirements, scenario generation, adaptive personas, rubric evaluation and test analysis. No document or conversation content is shown here.` }));
 
     container.append(el("div", { class: "rr-cards" },
       rrCard("Estimated spend", fmtUsd(s.costUsd), null, `${s.calls} call${s.calls === 1 ? "" : "s"}${s.failedCalls ? ` · ${s.failedCalls} failed` : ""}`),
@@ -2259,7 +2273,8 @@
     const payload = {
       name: state.test.name || state.file.replace(/\.json$/, ""),
       description: state.test.description || undefined,
-      steps: state.test.steps
+      steps: state.test.steps,
+      design: state.test.design
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -3118,13 +3133,15 @@
   }
 
   async function init() {
+    window.ProjectDocuments.init({ api, el, can, toast, confirmDialog, formDialog, openTest, refresh: async () => { await Promise.all([loadTests(), loadFolders()]); if (state.projectId) await loadRequirements(state.projectId); } });
     window.RunInspector.init({ api, el, toast });
     const reportTabs = [...document.querySelectorAll("[data-report-tab]")];
     const selectReportTab = key => { reportTabs.forEach(button => { const selected = button.dataset.reportTab === key; button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1; $(`report-${button.dataset.reportTab}-body`).hidden = !selected; }); $("report-days").hidden = key === "history"; document.querySelector('label[for="report-days"]').hidden = key === "history"; renderReport(); if (key === "history") void window.RunInspector.history($("report-run-history")); };
     reportTabs.forEach((button, index) => { button.onclick = () => selectReportTab(button.dataset.reportTab); button.onkeydown = event => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? reportTabs.length - 1 : (index + 1) % reportTabs.length; selectReportTab(reportTabs[next].dataset.reportTab); reportTabs[next].focus(); }; });
     $("nav-agents").hidden = !can("agents.manage");
     window.addEventListener("beforeunload", event => { if (window.AgentTesting.isDirty()) { event.preventDefault(); event.returnValue = ""; } });
-    $("btn-telemetry").addEventListener("click", () => { $("account-menu").open = false; switchTab("settings"); });
+    $("btn-account-settings").addEventListener("click", () => { $("account-menu").open = false; switchTab("settings"); });
+    $("btn-telemetry").addEventListener("click", () => { $("settings-telemetry").closest(".agent-card").scrollIntoView({ behavior: "smooth", block: "start" }); $("telemetry-days").focus({ preventScroll: true }); });
     $("telemetry-refresh").addEventListener("click", () => renderAiUsage($("settings-telemetry"), Number($("telemetry-days").value)));
     $("telemetry-days").addEventListener("change", () => renderAiUsage($("settings-telemetry"), Number($("telemetry-days").value)));
     void loadOverviewCounts();

@@ -20,6 +20,7 @@
 import express, { NextFunction, Request, Response } from "express";
 import fs from "fs";
 import path from "path";
+import crypto from "node:crypto";
 import { ChildProcess, spawn } from "child_process";
 import { chromium, devices } from "playwright";
 import { ActionExecutor, TestStep } from "../src/ActionExecutor";
@@ -61,7 +62,9 @@ import { listRequirements, saveRequirements, newRequirement, requirementInput } 
 import { RunDiagnostics, captureOptions, CaptureOptions, Diagnostics } from "../src/runDiagnostics";
 import { ROOT, WORKSPACE, JSON_DIR, SUITES_DIR, RUNS_DIR, DATA_DIR, HOST, PORT, MAX_ACTIVE_RUNS, RUN_TIMEOUT_MS } from "./config";
 import { readJson, writeJson, acquireWorkspaceLock } from "./storage";
-import { validateTest, ValidationError } from "../src/validation";
+import { validateTest, ValidationError, validateDesign, TestDesign } from "../src/validation";
+import * as documents from "./documents";
+import { documentRequirementsAI } from "./anthropic";
 import { securityHeaders, sameOrigin, authRateLimit } from "./security";
 import { addProject, addEnvironment, destination, environmentUrl, projectName, reconcileProjects, saveProjects, adaptationPlan, revision } from "./projects";
 import { startLiveScreen } from "../src/liveScreen";
@@ -126,6 +129,7 @@ interface TestFile {
   name: string;
   description: string;
   steps: Record<string, unknown>[];
+  design?: TestDesign;
 }
 
 interface SharedGrant {
@@ -287,7 +291,7 @@ function readTest(file: string): TestFile {
   const p = testPath(file);
   if (!fs.existsSync(p)) throw new HttpError(404, `Test not found: ${file}`);
 
-  let parsed: { name?: unknown; description?: unknown; steps?: unknown };
+  let parsed: { name?: unknown; description?: unknown; steps?: unknown; design?: unknown };
   try {
     parsed = JSON.parse(fs.readFileSync(p, "utf-8"));
   } catch {
@@ -297,6 +301,7 @@ function readTest(file: string): TestFile {
 
   return {
     file,
+    ...(parsed.design !== undefined ? { design: validateDesign(parsed.design) } : {}),
     name: typeof parsed.name === "string" ? parsed.name : "",
     description: typeof parsed.description === "string" ? parsed.description : "",
     steps: parsed.steps as Record<string, unknown>[]
@@ -1170,7 +1175,7 @@ app.put("/api/projects/:id/requirements/:requirementId", (req, res) => {
   if (input.tests.some(file => !canReadTest(file, user) || store.assignments[file]?.projectId !== row.projectId)) throw new HttpError(400, "Link only available tests in this project.");
   // Preserve links hidden from this editor; editing visible links must not revoke others.
   const hidden = row.tests.filter(file => !canReadTest(file, user) && store.assignments[file]?.projectId === row.projectId);
-  const next = { ...newRequirement(row.projectId, input, user.username), id: row.id, tests: [...new Set([...hidden, ...input.tests])] };
+  const next = { ...newRequirement(row.projectId, input, user.username), id: row.id, source: row.source, design: row.design, tests: [...new Set([...hidden, ...input.tests])] };
   saveRequirements(records.map(r => r.id === row.id ? next : r));
   res.json({ ...next, tests: input.tests });
 });
@@ -1182,6 +1187,95 @@ app.delete("/api/projects/:id/requirements/:requirementId", (req, res) => {
   if (req.body?.revision !== row.revision) throw new HttpError(409, "This requirement changed. Reopen it before deleting.");
   saveRequirements(records.filter(r => r.id !== row.id)); res.status(204).end();
 });
+function documentProject(req: Request, write = false) {
+  const user = write ? requireFeature(req, "folders.manage") : requireAuth(req);
+  const project = projectStore().projects.find(p => p.id === req.params.id);
+  if (!project) throw new HttpError(404, "Project not found.");
+  return { user, project };
+}
+function documentView(document: documents.ProjectDocument, full = false) {
+  const imported = listRequirements().filter(row => row.projectId === document.projectId && row.source?.documentId === document.id);
+  const { text, candidates, ...summary } = document;
+  return { ...summary, characters: text.length, candidateCount: candidates.length, importedCandidateIds: imported.map(row => row.source!.candidateId), importedCount: imported.length, aiAvailable: aiConfigured(), ...(full ? { text, candidates } : {}) };
+}
+app.get("/api/projects/:id/documents", (req, res) => {
+  const { project } = documentProject(req);
+  res.json(documents.listDocuments(project.id).map(document => documentView(document)));
+});
+app.post("/api/projects/:id/documents", async (req, res) => {
+  const { project } = documentProject(req, true);
+  const parsed = await documents.parseUpload(req.body?.name, req.body?.content);
+  const { user } = documentProject(req, true);
+  const all = documents.listDocuments(project.id);
+  const existing = all.find(document => document.hash === parsed.hash);
+  if (existing) { res.json(documentView(existing, true)); return; }
+  if (all.length >= 100) throw new HttpError(409, "This project has 100 documents. Remove an old source before uploading another.");
+  const document: documents.ProjectDocument = { ...parsed, id: crypto.randomUUID(), projectId: project.id, revision: crypto.randomUUID(), uploadedBy: user.username, uploadedAt: new Date().toISOString(), method: "sections", candidates: documents.sectionCandidates(parsed.text) };
+  documents.saveDocument(document); res.status(201).json(documentView(document, true));
+});
+app.get("/api/projects/:id/documents/:documentId", (req, res) => {
+  const { project } = documentProject(req);
+  res.json(documentView(documents.getDocument(project.id, String(req.params.documentId)), true));
+});
+app.delete("/api/projects/:id/documents/:documentId", (req, res) => {
+  const { project } = documentProject(req, true), document = documents.getDocument(project.id, String(req.params.documentId));
+  if (req.body?.revision !== document.revision) throw new HttpError(409, "Reopen the document before removing it.");
+  documents.deleteDocument(project.id, document.id); res.status(204).end();
+});
+app.post("/api/projects/:id/documents/:documentId/generate", async (req, res) => {
+  const { project, user } = documentProject(req, true); requireFeature(req, "ai.analyze");
+  const document = documents.getDocument(project.id, String(req.params.documentId));
+  if (document.revision !== req.body?.revision) throw new HttpError(409, "Reopen the document before generating a draft.");
+  if (!aiConfigured()) throw new HttpError(503, "Configure the AI provider to use AI extraction. Reviewing document sections works without AI.");
+  if (document.text.length > 24000) throw new HttpError(400, "AI extraction supports up to 24,000 characters. Split this document or review its sections without AI.");
+  if (documentView(document).importedCount) throw new HttpError(409, "Requirements have already been saved from this document. Edit those requirements directly.");
+  const raw = await documentRequirementsAI(document.text, user.username, document.id);
+  documentProject(req, true); requireFeature(req, "ai.analyze");
+  const current = documents.getDocument(project.id, document.id);
+  if (current.revision !== document.revision || documentView(current).importedCount) throw new HttpError(409, "The document changed during AI extraction. Reopen it.");
+  const next = { ...document, candidates: documents.validateCandidates(raw, document, true), method: "ai" as const, revision: crypto.randomUUID() };
+  documents.saveDocument(next); res.json(documentView(next, true));
+});
+app.post("/api/projects/:id/documents/:documentId/import", (req, res) => {
+  const { project, user } = documentProject(req, true), document = documents.getDocument(project.id, String(req.params.documentId));
+  if (req.body?.revision !== document.revision) throw new HttpError(409, "The document draft changed. Reopen it before saving requirements.");
+  const selected = documents.validateCandidates(req.body?.candidates, document);
+  const records = listRequirements();
+  const existing = records.filter(row => row.projectId === project.id && row.source?.documentId === document.id);
+  const fresh = selected.filter(candidate => !existing.some(row => row.source!.candidateId === candidate.id));
+  if (records.filter(row => row.projectId === project.id).length + fresh.length > 1000) throw new HttpError(409, "This project would exceed 1,000 requirements.");
+  const created = fresh.map(candidate => ({ ...newRequirement(project.id, { title: candidate.title, description: candidate.description, status: "draft", tests: [] }, user.username), source: { documentId: document.id, candidateId: candidate.id, name: document.name, quote: candidate.quote }, design: candidate.design }));
+  saveRequirements([...records, ...created]);
+  res.status(created.length ? 201 : 200).json({ created: created.length, requirementIds: [...existing.filter(row => selected.some(c => c.id === row.source!.candidateId)), ...created].map(row => row.id) });
+});
+app.post("/api/projects/:id/requirements/:requirementId/test-draft", (req, res) => {
+  const { project, user } = documentProject(req, true); requireFeature(req, "tests.create");
+  const records = listRequirements(), row = records.find(r => r.projectId === project.id && r.id === req.params.requirementId);
+  if (!row) throw new HttpError(404, "Requirement not found.");
+  const file = safeFile(`requirement-${row.id}.json`);
+  if (fs.existsSync(testPath(file))) {
+    const test = readTest(file);
+    if (test.design?.requirementId !== row.id || !canReadTest(file, user) || projectStore().assignments[file]?.projectId !== project.id) throw new HttpError(409, "The generated test already exists in another location or has restricted access.");
+    if (!row.tests.includes(file)) { if (row.tests.length >= 200) throw new HttpError(409, "Requirement test-link limit reached."); row.tests.push(file); row.revision = crypto.randomUUID(); saveRequirements(records); }
+    res.json({ file }); return;
+  }
+  if (req.body?.revision !== row.revision) throw new HttpError(409, "The requirement changed. Reopen it before creating a test draft.");
+  if (row.tests.length >= 200) throw new HttpError(409, "Requirement test-link limit reached.");
+  const store = projectStore();
+  let target;
+  try { target = destination(store, project.id, req.body?.environmentId); }
+  catch (error) { throw new HttpError(400, (error as Error).message); }
+  const design = { ...validateDesign(req.body?.design || row.design || documents.draftDesign(row.title, row.description)), requirementId: row.id };
+  const data = validateTestBody({ name: row.title, description: row.description, design, steps: [] });
+  const oldStore = structuredClone(store), oldRecords = structuredClone(records), oldMeta = loadTestMeta(), nextMeta = structuredClone(oldMeta), now = new Date().toISOString();
+  store.assignments[file] = { projectId: project.id, environmentId: target.environment.id };
+  nextMeta[file] = { createdBy: user.username, createdAt: now, updatedBy: user.username, updatedAt: now };
+  row.tests.push(file); row.revision = crypto.randomUUID(); row.updatedAt = now; row.updatedBy = user.username;
+  try { writeTest(file, data); saveTestMeta(nextMeta); saveProjects(store); saveRequirements(records); }
+  catch (error) { if (fs.existsSync(testPath(file))) fs.unlinkSync(testPath(file)); saveTestMeta(oldMeta); saveProjects(oldStore); saveRequirements(oldRecords); throw error; }
+  res.status(201).json({ file });
+});
+
 app.post("/api/projects", (req, res) => {
   requireFeature(req, "folders.manage");
   const store = projectStore();
@@ -1467,7 +1561,7 @@ app.delete("/api/tests/:file", (req, res) => {
   }
   fs.unlinkSync(testPath(file));
   const requirements = listRequirements();
-  if (requirements.some(r => r.tests.includes(file))) saveRequirements(requirements.map(r => r.tests.includes(file) ? { ...newRequirement(r.projectId, { ...r, tests: r.tests.filter(test => test !== file) }, user.username), id: r.id } : r));
+  if (requirements.some(r => r.tests.includes(file))) saveRequirements(requirements.map(r => r.tests.includes(file) ? { ...newRequirement(r.projectId, { ...r, tests: r.tests.filter(test => test !== file) }, user.username), id: r.id, source: r.source, design: r.design } : r));
   // Retain sharing metadata so deleting a test cannot expose its historical runs.
   res.status(204).end();
 });
@@ -1685,7 +1779,7 @@ app.post("/api/tests/import", (req, res) => {
 
   let result: ReturnType<typeof importTest>;
   try { result = importTest(body.content); } catch (error) { throw new HttpError(400, error instanceof Error ? error.message : "Invalid import."); }
-  if (!result.steps.length) {
+  if (!result.steps.length && !result.design) {
     throw new HttpError(422, "That file produced no runnable steps.");
   }
 
@@ -1707,6 +1801,7 @@ app.post("/api/tests/import", (req, res) => {
   const data = validateTestBody({
     name: result.name || cleaned,
     description: result.description,
+    design: result.design,
     steps: result.steps
   });
   const folder = typeof body.folder === "string" && body.folder.trim() ? normalizeFolder(body.folder) : undefined;

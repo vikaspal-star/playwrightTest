@@ -5,11 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import http from "node:http";
 
-function launch(workspace: string): { process: ChildProcess; ready: Promise<string> } {
+function launch(workspace: string, env: NodeJS.ProcessEnv = {}): { process: ChildProcess; ready: Promise<string> } {
   const child = spawn(process.execPath, ["--import", "tsx", "ui/server.ts"], {
     cwd: path.resolve(__dirname, "../.."),
-    env: { ...process.env, STUDIO_WORKSPACE: workspace, PORT: "0", HOST: "127.0.0.1", DB_DISABLED: "1" },
+    env: { ...process.env, STUDIO_WORKSPACE: workspace, PORT: "0", HOST: "127.0.0.1", DB_DISABLED: "1", ...env },
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -27,6 +28,50 @@ function launch(workspace: string): { process: ChildProcess; ready: Promise<stri
   });
   return { process: child, ready };
 }
+
+test("AI document extraction meters provider usage and rejects fabricated source evidence", { timeout: 30000 }, async () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "mmqa-document-ai-"));
+  const text = "A user with valid credentials must reach the account dashboard.";
+  let quote = "This quote was fabricated by the model";
+  const provider = http.createServer((req, res) => {
+    req.resume(); req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ content: [{ type: "text", text: JSON.stringify([{ title: "Successful sign in", description: text, quote, design: { preconditions: "A valid account exists.", steps: [{ instruction: "Submit valid credentials.", expected: "The dashboard is displayed." }] } }]) }], usage: { input_tokens: 111, output_tokens: 29 } }));
+    });
+  });
+  provider.listen(0, "127.0.0.1"); await once(provider, "listening");
+  const port = (provider.address() as { port: number }).port;
+  const server = launch(workspace, { ANTHROPIC_API_KEY: "local-fixture-key", ANTHROPIC_API_BASE: `http://127.0.0.1:${port}`, AI_DAILY_TOKEN_CAP: "1000" });
+  try {
+    const url = await server.ready;
+    const setup = await fetch(`${url}/api/auth/setup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: "owner", password: "safe-test-password" }) });
+    const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+    const send = (method: string, route: string, body?: unknown) => fetch(`${url}${route}`, { method, headers: { "Content-Type": "application/json", Cookie: cookie }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const project = await (await send("POST", "/api/projects", { name: "AI requirements", environment: { name: "QA", type: "sandbox", url: "https://example.com" } })).json();
+    const base = `/api/projects/${project.id}/documents`;
+    const document = await (await send("POST", base, { name: "login.txt", content: Buffer.from(text).toString("base64") })).json();
+    assert.ok(document.id);
+    assert.equal((await send("POST", `${base}/${document.id}/generate`, { revision: document.revision })).status, 400);
+    assert.equal((await (await send("GET", `${base}/${document.id}`)).json()).revision, document.revision);
+    quote = text;
+    const response = await send("POST", `${base}/${document.id}/generate`, { revision: document.revision }); assert.equal(response.status, 200);
+    const generated = await response.json(); assert.equal(generated.method, "ai"); assert.equal(generated.candidates[0].quote, text); assert.notEqual(generated.revision, document.revision);
+    assert.equal((await send("POST", `${base}/${document.id}/import`, { revision: document.revision, candidates: generated.candidates })).status, 409);
+    assert.equal((await send("POST", `${base}/${document.id}/import`, { revision: generated.revision, candidates: generated.candidates })).status, 201);
+    assert.equal((await send("POST", `${base}/${document.id}/generate`, { revision: generated.revision })).status, 409);
+    const usage = await (await send("GET", "/api/ai/usage")).json();
+    assert.equal(usage.summary.calls, 2); assert.equal(usage.summary.totalTokens, 280);
+    assert.equal(usage.summary.byFeature[0].feature, "document-requirements"); assert.equal(usage.summary.byUser[0].username, "owner");
+    assert.ok(!JSON.stringify(usage).includes(text));
+    const other = await (await send("POST", "/api/projects", { name: "Other project" })).json();
+    assert.equal((await send("GET", `/api/projects/${other.id}/documents/${document.id}`)).status, 404);
+  } finally {
+    if (server.process.exitCode === null) { const exited = once(server.process, "exit"); server.process.kill(); await exited; }
+    await new Promise<void>(resolve => provider.close(() => resolve()));
+    assert.equal(path.dirname(path.resolve(workspace)), path.resolve(os.tmpdir())); assert.ok(path.basename(workspace).startsWith("mmqa-document-ai-"));
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
 
 test("server recovers orphaned runs, refuses a second writer, and fails closed on corrupt accounts", { timeout: 20000 }, async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "mmqa-recovery-"));

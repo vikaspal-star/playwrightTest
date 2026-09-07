@@ -305,7 +305,7 @@ test("user management supports account creation, search, role guidance and respo
   page.on("pageerror", error => errors.push(error.message));
   await page.context().addCookies((await admin.storageState()).cookies);
   await page.goto("/");
-  await page.locator("#account-menu > summary").click();
+  await page.locator('.sidebar-tabs [data-tab="settings"]').click();
   await page.getByRole("button", { name: "Manage users", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Manage users", exact: true });
   const form = dialog.locator("#add-user-form");
@@ -347,7 +347,7 @@ test("user management supports account creation, search, role guidance and respo
   await expect(dialog.getByRole("button", { name: "Manage access for design-reviewer", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Done", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await expect(page.locator("#account-menu > summary")).toBeFocused();
+  await expect(page.locator("#btn-manage-users")).toBeFocused();
   expect(errors).toEqual([]);
 
   // Non-site admins can only create members, matching the server's role rules.
@@ -357,7 +357,7 @@ test("user management supports account creation, search, role guidance and respo
     await context.request.post("http://127.0.0.1:4187/api/auth/login", { data: { username: "team-manager", password } });
     const managerPage = await context.newPage();
     await managerPage.goto("http://127.0.0.1:4187/");
-    await managerPage.locator("#account-menu > summary").click();
+    await managerPage.locator('.sidebar-tabs [data-tab="settings"]').click();
     await managerPage.getByRole("button", { name: "Manage users", exact: true }).click();
     await expect(managerPage.locator("#new-role option[value=admin]")).toBeDisabled();
     await expect(managerPage.locator("#new-role option[value=site_admin]")).toBeDisabled();
@@ -694,13 +694,100 @@ test("agent testing creates, runs and exports real multi-turn conversations from
   } finally { await other.dispose(); fixture.closeAllConnections(); await new Promise<void>(resolve => fixture.close(() => resolve())); }
 });
 
+test("Settings consolidates account controls and documents create reviewed, linked test drafts", async ({ page, browser }) => {
+  const project = await (await admin.post("/api/projects", { data: { name: "Document workflow", environment: { name: "QA", type: "sandbox", url: "https://docs.example/" } } })).json();
+  const base = `/api/projects/${project.id}/documents`;
+  const text = "Sign in requirement\n\nValid credentials must open the account dashboard. Invalid credentials must show an error without signing in.";
+  const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+  await page.context().addCookies((await admin.storageState()).cookies);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/#view:tests");
+  await page.locator("#account-menu > summary").click();
+  await expect(page.locator("#account-menu .dropdown-panel button")).toHaveText(["Settings", "Log out"]);
+  await page.locator("#btn-account-settings").click();
+  await expect(page.locator("#btn-manage-users")).toBeVisible();
+  await expect(page.locator("#btn-password")).toBeVisible();
+  await page.locator("#btn-telemetry").click();
+  await expect(page.locator("#telemetry-days")).toBeFocused();
+  await page.locator(".settings-account").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "test-results/settings-account-desktop.png", fullPage: true });
+  await page.locator('.sidebar-tabs [data-tab="tests"]').click();
+  await page.getByRole("button", { name: "Open project Document workflow", exact: true }).click();
+  await page.getByRole("tab", { name: /^Requirements/ }).click();
+  await page.getByRole("button", { name: "Upload document", exact: true }).click();
+  const upload = page.getByRole("dialog", { name: "Upload requirement document", exact: true });
+  await upload.getByLabel("Requirement document").setInputFiles({ name: "sign-in.md", mimeType: "text/markdown", buffer: Buffer.from(text) });
+  await upload.getByRole("button", { name: "Extract document", exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Review · sign-in.md", exact: true });
+  await expect(review).toBeVisible();
+  await review.getByLabel("Requirement title", { exact: true }).fill("Sign in safely");
+  await review.getByLabel("Acceptance criteria", { exact: true }).fill("Valid credentials open the dashboard; invalid credentials show an error.");
+  await review.getByText("Source excerpt", { exact: true }).click();
+  await expect(review.locator(".document-source")).toHaveText(text);
+  await page.screenshot({ path: "test-results/document-review-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "test-results/document-review-mobile.png", fullPage: true });
+  expect(await review.evaluate(node => node.scrollWidth <= node.clientWidth)).toBeTruthy();
+  await review.getByRole("button", { name: "Save selected requirements", exact: true }).click();
+  await expect(review).toHaveCount(0);
+  const docs = await (await admin.get(base)).json(); expect(docs).toHaveLength(1);
+  const doc = await (await admin.get(`${base}/${docs[0].id}`)).json();
+  expect(doc.importedCount).toBe(1);
+  expect((await admin.post(base, { data: { name: "same-content.txt", content: Buffer.from(text).toString("base64") } })).status()).toBe(200);
+  expect(await (await admin.get(base)).json()).toHaveLength(1);
+  expect((await member.post(base, { data: { name: "blocked.txt", content: Buffer.from(text).toString("base64") } })).status()).toBe(403);
+  expect((await member.post(`${base}/${doc.id}/import`, { data: { revision: doc.revision, candidates: doc.candidates } })).status()).toBe(403);
+  expect((await member.post(`${base}/${doc.id}/generate`, { data: { revision: doc.revision } })).status()).toBe(403);
+  expect((await admin.post(`${base}/${doc.id}/import`, { data: { revision: "stale", candidates: doc.candidates } })).status()).toBe(409);
+  const duplicate = await (await admin.post(`${base}/${doc.id}/import`, { data: { revision: doc.revision, candidates: doc.candidates } })).json(); expect(duplicate.created).toBe(0);
+  let requirement = (await (await admin.get(`/api/projects/${project.id}/requirements`)).json())[0];
+  expect(requirement.source.quote).toBe(text); expect(requirement.title).toBe("Sign in safely"); expect(requirement.status).toBe("draft");
+  expect((await member.post(`/api/projects/${project.id}/requirements/${requirement.id}/test-draft`, { data: {} })).status()).toBe(403);
+  expect((await admin.post(`/api/projects/${project.id}/requirements/${requirement.id}/test-draft`, { data: { revision: requirement.revision, environmentId: "missing" } })).status()).toBe(400);
+  await page.getByRole("button", { name: "Create test draft", exact: true }).click();
+  const draft = page.getByRole("dialog", { name: "Create linked test draft", exact: true });
+  await draft.getByLabel("Test action 1", { exact: true }).fill("Sign in using valid test credentials.");
+  await draft.getByLabel("Expected result 1", { exact: true }).fill("The account dashboard is displayed.");
+  await draft.getByRole("button", { name: "Add design step", exact: true }).click();
+  await draft.getByRole("button", { name: "Remove design step", exact: true }).last().click();
+  await expect(draft).toBeVisible();
+  await draft.getByRole("button", { name: "Create test draft", exact: true }).click();
+  await expect(draft).toHaveCount(0);
+  await page.locator("#test-design > summary").click();
+  await expect(page.getByLabel("Test action 1", { exact: true })).toHaveValue("Sign in using valid test credentials.");
+  await page.getByLabel("Expected result 1", { exact: true }).fill("The signed-in account dashboard is displayed.");
+  await page.locator("#btn-save").click();
+  requirement = (await (await admin.get(`/api/projects/${project.id}/requirements`)).json())[0];
+  expect(requirement.tests).toHaveLength(1);
+  const file = requirement.tests[0], saved = await (await admin.get(`/api/tests/${file}`)).json();
+  expect(saved.steps).toEqual([]); expect(saved.design.steps[0].expected).toBe("The signed-in account dashboard is displayed.");
+  expect((await admin.post(`/api/tests/${file}/run`)).status()).toBe(400);
+  const again = await (await admin.post(`/api/projects/${project.id}/requirements/${requirement.id}/test-draft`, { data: { revision: requirement.revision, environmentId: project.environments[0].id } })).json(); expect(again.file).toBe(file);
+  expect((await admin.post("/api/tests/import", { data: { content: saved, file: "roundtrip-document", projectId: project.id, environmentId: project.environments[0].id } })).status()).toBe(201);
+  expect((await (await admin.get("/api/tests/roundtrip-document.json")).json()).design).toEqual(saved.design);
+  const context = await browser.newContext();
+  try {
+    await context.addCookies((await member.storageState()).cookies);
+    const viewer = await context.newPage(); await viewer.goto(`http://127.0.0.1:4187/#${file}`);
+    await viewer.locator("#test-design > summary").click();
+    await expect(viewer.getByLabel("Test action 1", { exact: true })).toBeDisabled();
+  } finally { await context.close(); }
+  expect((await admin.delete(`${base}/${doc.id}`, { data: { revision: doc.revision } })).status()).toBe(204);
+  expect((await admin.get(`/api/tests/${file}`)).status()).toBe(200);
+  expect((await (await admin.get(`/api/projects/${project.id}/requirements`)).json())[0].source.quote).toBe(text);
+  expect((await admin.delete(`/api/tests/${file}`)).status()).toBe(204);
+  requirement = (await (await admin.get(`/api/projects/${project.id}/requirements`)).json())[0];
+  expect(requirement.tests).toHaveLength(0); expect(requirement.source.quote).toBe(text);
+  expect(errors).toEqual([]);
+});
+
 test("password form revokes other sessions and keeps the current session", async ({ playwright, page }) => {
   const other = await playwright.request.newContext({ baseURL: "http://127.0.0.1:4187" });
   try {
     await other.post("/api/auth/login", { data: { username: "viewer", password } });
     await page.context().addCookies((await member.storageState()).cookies);
     await page.goto("/");
-    await page.locator("#account-menu > summary").click();
+    await page.locator('.sidebar-tabs [data-tab="settings"]').click();
     await page.getByRole("button", { name: "Password", exact: true }).click();
     await page.getByLabel("Current password", { exact: true }).fill(password);
     await page.getByLabel("New password", { exact: true }).fill(`${password}-new`);

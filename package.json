@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:unit": "node --import tsx --test tests/unit/*.test.ts",
     "test:studio": "playwright test --config playwright.studio.config.ts",
-    "check": "npm run typecheck && node --check ui/public/app.js && node --check ui/public/agent-testing.js && node --check ui/public/run-inspector.js && npm run test:unit",
+    "check": "npm run typecheck && node --check ui/public/app.js && node --check ui/public/agent-testing.js && node --check ui/public/run-inspector.js && node --check ui/public/project-documents.js && npm run test:unit",
     "allure:generate": "allure generate allure-results --clean -o allure-report",
     "allure:open": "allure open allure-report"
   },
@@ -31,6 +31,8 @@
   "dependencies": {
     "@axe-core/playwright": "^4.13.0",
     "express": "^5.2.1",
+    "mammoth": "^1.12.2",
+    "pdf-parse": "^2.4.5",
     "pg": "^8.23.0"
   }
 }

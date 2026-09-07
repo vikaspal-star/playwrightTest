@@ -44,7 +44,7 @@ A local UI for building and running the JSON tests:
 npm run ui               # http://localhost:4173
 ```
 
-- Use the persistent navigation to move between Overview, Projects, Suites, and Reports. The overview shows current counts and recent test activity; click a count to open the corresponding library filter.
+- Use the persistent navigation to move between Overview, Projects, Suites, Reports, Agent Testing and Settings. The overview shows current counts and recent test activity; click a count to open the corresponding library filter.
 - Open a project card, choose its Sandbox or Production environment, and browse a flat test list. Create projects, configure application URLs and import JSON from the Projects toolbar. New tests receive unique filenames automatically.
 - Collapse step details in the compact left column and use the larger right browser panel to record or replay. Add steps manually or record them from the application screen. The navigation drawer can be hidden on desktop as well as mobile. Unsaved drafts survive returning to Projects.
 - Run a test and follow its live browser screen. Completed steps retain screenshots, failure details and console logs. Selecting an earlier step pauses following; Follow live resumes it.
@@ -57,6 +57,12 @@ The UI supplies a private input snapshot and separate output directories to the 
 ### Projects and environments
 
 Projects contain one level of environments, each with a Sandbox or Production type and application URL. Existing folders are migrated additively into `ui/data/projects.json`; test files, sharing metadata and history remain intact. Use **Move** under a test name to preview destination URL changes and request an optional AI review before applying them. See [the upgrade guide](docs/PROJECTS_UPGRADE.md) for migration, recovery, recording controls and verification.
+
+### Documents, requirements and test drafts
+
+Open **Projects → your project → Requirements → Upload document** to extract PDF, DOCX, TXT or Markdown source text. Review and edit the proposed requirements, save the selected items, and choose **Create test draft** beside a requirement to review tester actions and expected results in the chosen environment. Source excerpts stay linked to requirements. Add recorded or manual automation steps before running a draft.
+
+Text extraction works without AI. **Extract with AI** optionally proposes requirements and test designs using the configured provider; its tokens appear in **Settings → AI telemetry** as `document-requirements`. See [document workflow and limits](docs/DOCUMENT_REQUIREMENTS.md).
 
 ### Sharing
 
@@ -78,7 +84,7 @@ Three roles, in a ladder:
 | Admin | Day-to-day administration: users, tests, suites, reports. |
 | Member | Only what the site admin grants. Defaults include creating/editing/running tests, managing folders, running suites, and viewing reports. |
 
-The **Manage users** dialog separates account creation from the member list, with labeled fields, role guidance, password visibility, and search by name or role.
+**Settings → Account and access** contains **Manage users**, **Password**, and an **AI telemetry** shortcut. The account dropdown contains Settings and Log out. Manage users is shown only to accounts with user-management access; its dialog separates account creation from the member list, with labeled fields, role guidance, password visibility, and search by name or role.
 
 Usernames are the workspace identity key — they attribute tests, address sharing grants and notifications, and group the reports. They must start with a letter or number and use only letters, numbers, spaces, dots, hyphens and underscores, and repeated whitespace is collapsed before the name is stored, so two accounts can never render identically. A member whose grants differ from their role default is marked **Custom access** in the member list.
 

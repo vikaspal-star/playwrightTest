@@ -34,7 +34,7 @@ const PRICE_PER_MILLION_OUTPUT = Number(process.env.AI_PRICE_OUTPUT ?? 15);
 /** Optional guard rail: 0 or unset means no cap. */
 const DAILY_TOKEN_CAP = Number(process.env.AI_DAILY_TOKEN_CAP ?? 0);
 
-export type AiFeature = "step-analysis" | "run-summary" | "environment-review" | "agent-testing";
+export type AiFeature = "step-analysis" | "run-summary" | "environment-review" | "agent-testing" | "document-requirements";
 
 export interface UsageRecord {
   at: string;

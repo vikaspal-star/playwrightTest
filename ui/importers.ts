@@ -12,12 +12,14 @@
 // loses part of a test.
 // ============================================================
 
+import { validateDesign, TestDesign } from "../src/validation";
 export type ImportFormat = "teststudio" | "reflect" | "unknown";
 
 export interface ImportResult {
   format: ImportFormat;
   name: string;
   description: string;
+  design?: TestDesign;
   steps: Record<string, unknown>[];
   /** Steps that had no equivalent action, kept for the caller to report. */
   skipped: { index: number; type: string; reason: string }[];
@@ -158,6 +160,7 @@ export function importTest(input: unknown): ImportResult {
       format,
       name,
       description,
+      ...(obj.design !== undefined ? { design: validateDesign(obj.design) } : {}),
       steps,
       skipped: rawSteps.length - steps.length
         ? [{ index: 0, type: "unknown", reason: `${rawSteps.length - steps.length} entries had no "action" and were dropped` }]

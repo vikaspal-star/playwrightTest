@@ -6,6 +6,8 @@ import { readJson, writeJson } from "./storage";
 export interface Requirement {
   id: string; projectId: string; title: string; description: string;
   status: "draft" | "approved"; tests: string[]; revision: string; updatedAt: string; updatedBy: string;
+  source?: { documentId: string; candidateId: string; name: string; quote: string };
+  design?: import("../src/validation").TestDesign;
 }
 const FILE = path.join(DATA_DIR, "requirements.json");
 export function listRequirements(): Requirement[] { return readJson<Requirement[]>(FILE, []); }

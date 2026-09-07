@@ -7,8 +7,16 @@ export class ValidationError extends Error {
 const numeric = new Set(["timeout", "x", "y"]);
 const emptyAllowed = new Set(["value", "text", "message", "promptText"]);
 
+export interface TestDesign { preconditions: string; steps: { instruction: string; expected: string }[]; requirementId?: string }
+export function validateDesign(value: unknown): TestDesign {
+  const input = value as TestDesign;
+  if (!input || typeof input !== "object" || typeof input.preconditions !== "string" || input.preconditions.length > 3000 || !Array.isArray(input.steps) || !input.steps.length || input.steps.length > 12 || input.steps.some(step => !step || typeof step.instruction !== "string" || !step.instruction.trim() || step.instruction.length > 3000 || typeof step.expected !== "string" || !step.expected.trim() || step.expected.length > 6000)) throw new ValidationError("Test design needs preconditions and 1–12 actions with expected results.");
+  if (input.requirementId !== undefined && (typeof input.requirementId !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(input.requirementId))) throw new ValidationError("Invalid requirement reference.");
+  return { preconditions: input.preconditions, steps: input.steps.map(step => ({ instruction: step.instruction, expected: step.expected })), ...(input.requirementId ? { requirementId: input.requirementId } : {}) };
+}
+
 /** Catalog validation shared by the API and CLI. Drafts can be empty; executions cannot. */
-export function validateTest(body: unknown, runnable = false): { name?: string; description?: string; steps: Record<string, unknown>[] } {
+export function validateTest(body: unknown, runnable = false): { name?: string; description?: string; design?: TestDesign; steps: Record<string, unknown>[] } {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new ValidationError("Test must be an object.");
   const input = body as Record<string, unknown>;
   if (!Array.isArray(input.steps)) throw new ValidationError("steps must be an array.");
@@ -54,6 +62,7 @@ export function validateTest(body: unknown, runnable = false): { name?: string; 
     return clean;
   });
   return {
+    ...(input.design !== undefined ? { design: validateDesign(input.design) } : {}),
     ...(typeof input.name === "string" && input.name.trim() ? { name: input.name.trim() } : {}),
     ...(typeof input.description === "string" && input.description.trim() ? { description: input.description.trim() } : {}),
     steps

@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="agent-testing.css">
   <link rel="stylesheet" href="projects.css">
   <link rel="stylesheet" href="run-inspector.css">
+  <link rel="stylesheet" href="project-documents.css">
 </head>
 <body>
 
@@ -205,7 +206,7 @@
         <button id="btn-notifications" class="bell" title="Notifications" aria-label="Notifications"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#bell"/></svg><span id="bell-count" class="bell-count" hidden>0</span></button>
         <details id="account-menu" class="dropdown account-menu">
           <summary aria-label="Account menu"><span id="account-avatar" class="account-avatar">M</span><span class="account-info"><span id="account-name" class="account-name"></span><span id="account-role" class="account-role"></span></span><svg class="icon icon-small" aria-hidden="true"><use href="brand/icons.svg#chevron"/></svg></summary>
-          <div class="dropdown-panel"><span class="menu-caption">YOUR ACCOUNT</span><button id="btn-manage-users" hidden>Manage users</button><button id="btn-telemetry">Settings · AI telemetry</button><button id="btn-password">Password</button><div class="menu-divider"></div><button id="btn-logout">Log out</button></div>
+          <div class="dropdown-panel"><span class="menu-caption">YOUR ACCOUNT</span><button id="btn-account-settings">Settings</button><div class="menu-divider"></div><button id="btn-logout">Log out</button></div>
         </details>
       </div>
     </header>
@@ -213,6 +214,7 @@
     <section id="agents-panel" class="page-content" hidden aria-label="Agent Testing"></section>
     <section id="settings-panel" class="page-content" hidden aria-labelledby="settings-title">
       <div class="page-heading"><div><span class="eyebrow">WORKSPACE SETTINGS</span><h1 id="settings-title">Settings</h1><p>Choose run evidence and monitor AI token consumption.</p></div></div>
+      <div class="surface agent-card settings-account"><h2>Account and access</h2><p class="agent-muted">Manage workspace members, change your password, and review AI usage.</p><div class="agent-actions"><button id="btn-manage-users" class="btn" hidden>Manage users</button><button id="btn-password" class="btn">Password</button><button id="btn-telemetry" class="btn">AI telemetry</button></div></div>
       <div class="surface agent-card capture-settings"><h2>Run evidence</h2><p class="agent-muted">Preferences for new browser test and suite runs started from this browser.</p><label><input type="checkbox" id="capture-video" checked>Record video for passed and failed runs</label><label><input type="checkbox" id="capture-accessibility">Accessibility checks · WCAG 2.1 A/AA</label><p class="agent-muted">Commands, screenshots, browser console, network metadata, and navigation timings are captured automatically. Video records visible page content. Accessibility scans add time and report advisory findings. These captures use no AI tokens.</p></div>
       <div class="surface agent-card"><div class="agent-section-heading"><div><h2>Telemetry · AI usage</h2><p class="agent-muted">Reported tokens, estimated spend, and the features using them.</p></div><div class="agent-actions"><label class="agent-field">Period<select id="telemetry-days"><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option></select></label><button class="btn" id="telemetry-refresh">Refresh</button></div></div><div id="settings-telemetry" aria-live="polite"></div></div>
     </section>
@@ -283,6 +285,7 @@
             </div>
             <input id="test-description" class="input-desc" placeholder="Description (optional)" autocomplete="off">
             <div id="test-validation" class="validation-message" role="alert" hidden></div>
+            <details id="test-design" hidden><summary>Test design · actions &amp; expected results</summary><p class="muted">Review this design, then record or add automation steps below before running.</p><div id="test-design-content"></div></details>
             <div id="steps" class="steps"></div>
           </fieldset>
         </section>
@@ -516,6 +519,7 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <script src="agent-testing.js"></script>
 <script src="run-inspector.js"></script>
+<script src="project-documents.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
