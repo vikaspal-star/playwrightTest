@@ -55,3 +55,47 @@ test("running work does not dilute pass rate and alternating results indicate fl
   assert.equal(knowledge.passed, 2);
   assert.equal(knowledge.flakinessScore, 100);
 });
+
+test("AI spend is metered from reported tokens, priced, and capped", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "mmqa-usage-"));
+  const previous = { ws: process.env.STUDIO_WORKSPACE, cap: process.env.AI_DAILY_TOKEN_CAP };
+  process.env.STUDIO_WORKSPACE = workspace;
+  process.env.AI_DAILY_TOKEN_CAP = "2000";
+  try {
+    // Loaded after the workspace is set so it writes into the temp directory.
+    const usage = require("../../ui/aiUsage") as typeof import("../../ui/aiUsage");
+
+    // Cost comes from the provider's own token counts, not an estimate.
+    const row = usage.record({
+      feature: "step-analysis",
+      model: "test-model",
+      username: "sageer",
+      usage: { input_tokens: 1000, output_tokens: 500 }
+    });
+    assert.equal(row.inputTokens, 1000);
+    assert.equal(row.outputTokens, 500);
+    assert.equal(row.costUsd, usage.costOf(1000, 500));
+    assert.ok(row.costUsd > 0, "a call that used tokens must cost something");
+
+    // A failed call still consumed input tokens, so it is still recorded.
+    usage.record({ feature: "run-summary", model: "test-model", username: "priya", ok: false, error: "timeout" });
+
+    const summary = usage.summary(30);
+    assert.equal(summary.calls, 2);
+    assert.equal(summary.failedCalls, 1);
+    assert.equal(summary.totalTokens, 1500);
+    assert.deepEqual(summary.byUser.map(u => u.username).sort(), ["priya", "sageer"]);
+
+    // 1500 of a 2000 cap is still spendable.
+    usage.assertWithinCap();
+
+    // Crossing it stops further spending rather than letting a loop run away.
+    usage.record({ feature: "agent-testing", model: "test-model", usage: { input_tokens: 600, output_tokens: 0 } });
+    assert.equal(usage.tokensUsedToday(), 2100);
+    assert.throws(() => usage.assertWithinCap(), /daily AI token cap/);
+  } finally {
+    if (previous.ws === undefined) delete process.env.STUDIO_WORKSPACE; else process.env.STUDIO_WORKSPACE = previous.ws;
+    if (previous.cap === undefined) delete process.env.AI_DAILY_TOKEN_CAP; else process.env.AI_DAILY_TOKEN_CAP = previous.cap;
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});

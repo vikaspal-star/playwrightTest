@@ -1804,6 +1804,7 @@
     }
 
     renderProjectTable($("report-projects"), r.perProject || []);
+    void renderAiUsage($("report-ai-usage"));
     renderDepartmentTable($("report-departments"), r.perDepartment || []);
     renderUserTable($("report-users"), r.perUser || []);
     renderReportTable($("report-tests"), r.perTest, "test");
@@ -1874,6 +1875,56 @@
     }
     table.append(body);
     container.append(table);
+  }
+
+  const fmtUsd = n => n >= 1 ? `${n.toFixed(2)}` : n > 0 ? `${n.toFixed(4)}` : "$0";
+  const fmtTokens = n => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+
+  async function renderAiUsage(container) {
+    if (!container) return;
+    let data;
+    try {
+      data = await api(`/api/ai/usage?days=${state.reportDays || 30}`);
+    } catch (e) {
+      container.replaceChildren(el("div", { class: "muted", text: e.message }));
+      return;
+    }
+    const s = data.summary;
+    container.replaceChildren();
+
+    if (!s.calls) {
+      container.append(el("div", { class: "muted", text: "No AI calls yet. Analysing a failure or summarising a run will appear here with its token cost." }));
+      return;
+    }
+
+    container.append(el("div", { class: "rr-cards" },
+      rrCard("Spend", fmtUsd(s.costUsd), null, `${s.calls} call${s.calls === 1 ? "" : "s"}${s.failedCalls ? ` · ${s.failedCalls} failed` : ""}`),
+      rrCard("Tokens", fmtTokens(s.totalTokens), null, `${fmtTokens(s.inputTokens)} in · ${fmtTokens(s.outputTokens)} out`),
+      rrCard("Today", fmtTokens(s.cap.usedToday), null,
+        s.cap.dailyTokenCap ? `cap ${fmtTokens(s.cap.dailyTokenCap)} · ${fmtTokens(s.cap.remaining)} left` : "no cap set"),
+      rrCard("Rate", `${s.pricing.inputPerMillionUsd}/${s.pricing.outputPerMillionUsd}`, null, "per M in / out")
+    ));
+
+    const table = (title, rows, label) => {
+      if (!rows.length) return null;
+      const t = el("table", { class: "report-table" },
+        el("thead", {}, el("tr", {}, el("th", { text: title }), el("th", { text: "Calls" }), el("th", { text: "Tokens" }), el("th", { text: "Cost" }))));
+      const body = el("tbody");
+      for (const row of rows) {
+        body.append(el("tr", {},
+          el("td", { text: row[label] }),
+          el("td", { text: String(row.calls) }),
+          el("td", { text: fmtTokens(row.totalTokens) }),
+          el("td", { text: fmtUsd(row.costUsd) })));
+      }
+      t.append(body);
+      return t;
+    };
+
+    const byFeature = table("Feature", s.byFeature, "feature");
+    if (byFeature) container.append(rrSection("Where the spend goes", byFeature));
+    const byUser = table("User", s.byUser, "username");
+    if (byUser) container.append(rrSection("Who is spending it", byUser));
   }
 
   function renderDepartmentTable(container, rows) {

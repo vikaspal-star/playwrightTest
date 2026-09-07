@@ -55,6 +55,7 @@ import { importTest } from "./importers";
 import * as recorder from "./recorder";
 import * as screencast from "./agent/screencast";
 import { AnalysisResult, analyzeFailure, analyzeRun, analyzeAdaptation, isConfigured as aiConfigured } from "./anthropic";
+import * as aiUsage from "./aiUsage";
 import { ROOT, WORKSPACE, JSON_DIR, SUITES_DIR, RUNS_DIR, DATA_DIR, HOST, PORT, MAX_ACTIVE_RUNS, RUN_TIMEOUT_MS } from "./config";
 import { readJson, writeJson, acquireWorkspaceLock } from "./storage";
 import { validateTest, ValidationError } from "../src/validation";
@@ -1842,6 +1843,8 @@ app.post("/api/runs/:id/summarize", async (req, res) => {
   const knowledge = buildKnowledge(rec.file, history);
 
   const result = await analyzeRun({
+    username: requireAuth(req).username,
+    subject: rec.id,
     name: rec.name,
     kind: rec.kind ?? "test",
     status: rec.status,
@@ -1861,6 +1864,14 @@ app.post("/api/runs/:id/summarize", async (req, res) => {
 });
 
 // ---- AI failure analysis ----
+
+// What the AI features have cost. Token counts come from the provider's own
+// usage block rather than an estimate, priced with the configured rates.
+app.get("/api/ai/usage", (req, res) => {
+  requireAuth(req);
+  const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+  res.json({ summary: aiUsage.summary(days), recent: aiUsage.recent(25) });
+});
 
 app.get("/api/ai/status", (req, res) => {
   requireAuth(req);
@@ -1897,6 +1908,8 @@ app.post("/api/runs/:id/steps/:index/analyze", async (req, res) => {
   const screenshotPath = step.screenshot ? path.join(RUNS_DIR, rec.id, step.screenshot) : undefined;
 
   const result = await analyzeFailure({
+    username: requireAuth(req).username,
+    subject: `${rec.id}#${index}`,
     action: step.action,
     step: stepDef,
     error: step.error ?? "",

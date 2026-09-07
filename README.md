@@ -44,19 +44,19 @@ A local UI for building and running the JSON tests:
 npm run ui               # http://localhost:4173
 ```
 
-- Use the persistent navigation to move between Overview, Test library, Suites, and Reports. The overview shows current counts and recent test activity; click a count to open the corresponding library filter.
-- Browse tests in a full-width library with nested folders, wrapping test names, step counts, and last-run status. Search by test name, filename, or folder. Create tests, create folders, and import JSON directly from the library toolbar.
-- Edit steps in a form driven by the action catalog. Returning to the library keeps the current test or suite draft available; reopening it restores your unsaved work. The navigation becomes a drawer on smaller screens.
-- Run a test and watch each step go green (or red) live, with a screenshot captured after every step (click it to zoom), the error text when a step fails, and console log tail.
+- Use the persistent navigation to move between Overview, Projects, Suites, and Reports. The overview shows current counts and recent test activity; click a count to open the corresponding library filter.
+- Open a project card, choose its Sandbox or Production environment, and browse a flat test list. Create projects, configure application URLs and import JSON from the Projects toolbar. New tests receive unique filenames automatically.
+- Collapse step details in the compact left column and use the larger right browser panel to record or replay. Add steps manually or record them from the application screen. The navigation drawer can be hidden on desktop as well as mobile. Unsaved drafts survive returning to Projects.
+- Run a test and follow its live browser screen. Completed steps retain screenshots, failure details and console logs. Selecting an earlier step pauses following; Follow live resumes it.
 - Run history is kept under `runs/<runId>/` (git-ignored). Each single-test run has its own HTML report at `/runs/<runId>/report/`, linked from its run panel. `/report/` is reserved for admin access to legacy CLI reports.
 
 The UI uses the same Playwright JSON runner as the CLI. It sets `RUN_DIR`, which makes `src/JsonRunner.ts` write per-step screenshots and emit `@@STEP` progress lines; plain CLI runs are unaffected.
 
 The UI supplies a private input snapshot and separate output directories to the same JSON runner used by the CLI. Concurrent tests cannot overwrite one another's reports. An empty test can be saved as a draft; running requires at least one valid step. Saving and execution both validate actions against the catalog, including required fields and bounded timeouts. Intentional empty input values are preserved.
 
-### Folders
+### Projects and environments
 
-Tests can be organised into nested folders of any depth. Folders are **virtual**: the JSON files stay flat in `json/`, and the folder path is stored as metadata, so `npm test` and CI discover tests exactly as before. Create folders from **Test library → New folder**, or use the subfolder control on a folder row. Move a test with the folder button under its name.
+Projects contain one level of environments, each with a Sandbox or Production type and application URL. Existing folders are migrated additively into `ui/data/projects.json`; test files, sharing metadata and history remain intact. Use **Move** under a test name to preview destination URL changes and request an optional AI review before applying them. See [the upgrade guide](docs/PROJECTS_UPGRADE.md) for migration, recovery, recording controls and verification.
 
 ### Sharing
 
@@ -119,8 +119,8 @@ Without the key set, the button is replaced by a note explaining how to enable i
 
 ## Recording, importing, and exporting
 
-- **Record steps** (test editor → Test actions): enter a URL and a real browser opens. Clicks, typing, dropdowns, checkboxes, and Enter/Escape/Tab become steps, streamed into the panel live. Password fields are recorded as a step but their value is never captured. Selectors prefer `id`, then test ids, `name`, `aria-label`, placeholder, a unique class, then visible text; a positional fallback is flagged **fragile**. Set `RECORDER_HEADLESS=1` on a machine with no display.
-- **Import JSON** (Test library toolbar): accepts a Test Studio export or a **Reflect** export. Reflect steps are mapped to the equivalent actions and their descriptions are kept as notes; anything with no faithful equivalent is reported rather than silently dropped.
+- **Record screen** opens an interactive Chromium screen inside the editor. Click and type directly in it; recorded steps appear below. Select an insertion position and choose **Add to draft** to preserve unsaved work. Password values are omitted. **Capture screenshot step** adds a screenshot action. Complex frame/tab journeys need manual review.
+- **Import JSON** (Projects toolbar): accepts a Test Studio export or a **Reflect** export. Reflect steps are mapped to the equivalent actions and their descriptions are kept as notes; anything with no faithful equivalent is reported rather than silently dropped.
 - **Export JSON** (test editor → Test actions): downloads the open test as JSON.
 
 Reflect visual comparisons are reported as unsupported because no baseline comparison exists. Scrolls without coordinates and waits without a recorded duration are also reported, rather than assigning fabricated values.
@@ -143,6 +143,20 @@ Starts Postgres (host port **5433**) plus Adminer on http://localhost:8081. Fini
 ### Branding
 
 The UI carries Mindmatrix branding: navy `#081120`, the arc gradient running blue `#0F8EFB` through violet `#7A4FC8` into orange `#EF6B2A`, and Poppins type. The MMQA mark pairs that arc with a check for the QA half of the story; it lives in `ui/public/brand/` as `mark.svg` (square, also the favicon) and `logo.svg` (horizontal lockup). Poppins loads from Google Fonts with a system fallback, so the UI still looks right offline.
+
+## AI usage and spend
+
+Every call to the model provider is metered. Token counts come from the provider's own `usage` block, so they are reported rather than estimated, and each call is attributed to the person and the thing that triggered it. The **Reports** tab shows spend, tokens in and out, where it goes by feature, and who is spending it.
+
+Prices change, so they are configuration rather than constants:
+
+```bash
+AI_PRICE_INPUT=3          # USD per million input tokens
+AI_PRICE_OUTPUT=15        # USD per million output tokens
+AI_DAILY_TOKEN_CAP=200000 # optional; 0 or unset means no cap
+```
+
+With a cap set, a call that would cross it is refused before spending anything, so a runaway loop stops rather than becoming a bill. Failed provider calls are recorded too: a failure still consumes input tokens.
 
 ## CI
 
