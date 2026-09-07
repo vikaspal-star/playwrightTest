@@ -19,5 +19,9 @@
     "playwright.config.ts",
     "playwright.studio.config.ts",
     "ui/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "ui/data"
   ]
 }

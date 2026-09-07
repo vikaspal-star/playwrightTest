@@ -169,8 +169,11 @@ button, input, select, summary { font: inherit; }
 .input-title { font-size: 21px; padding-left: 3px; }
 .file-row { flex-wrap: wrap; padding-left: 0; gap: 9px; }
 .file-name { padding-left: 3px; font-size: 12px; }
-.panes { padding: 14px 28px 26px; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow: visible; min-height: 500px; }
-.panes .pane { min-height: 480px; }
+/* A floor taller than the window pushed the run panel off-screen and left dead
+   space under the screenshot. Keep a floor only while it still fits, and let
+   the panels scroll internally instead of growing past the viewport. */
+.panes { padding: 14px 28px 26px; gap: 18px; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow: visible; min-height: min(500px, 100%); }
+.panes .pane { min-height: 0; }
 .step-desc { font-size: 12px; }
 .run-status { flex-wrap: wrap; font-size: 12px; }
 .pane-head { gap: 10px; }

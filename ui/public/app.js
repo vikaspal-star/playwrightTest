@@ -12,6 +12,10 @@
     fields: {},
     tests: [],
     folders: [],
+    projects: [],
+    assignments: {},
+    projectId: "",
+    environmentId: "",
     file: null,
     test: null,
     dirty: false,
@@ -26,7 +30,6 @@
     allUsers: [],
     recording: null,
     recordSource: null,
-    screenSource: null,
     featureCatalog: [],
     aiConfigured: false,
     report: null,
@@ -212,6 +215,57 @@
     });
   }
 
+  function formDialog(title, content, label, submit) {
+    const previousFocus = document.activeElement;
+    const error = el("p", { class: "auth-error", role: "alert", hidden: true });
+    const button = el("button", { class: "btn btn-primary", type: "submit", text: label });
+    const dialog = el("dialog", { class: "project-dialog", "aria-label": title });
+    const close = () => { dialog.close(); dialog.remove(); previousFocus?.focus(); };
+    const form = el("form", { class: "project-form", onsubmit: async event => {
+      event.preventDefault(); button.disabled = true; error.hidden = true;
+      try { if (await submit() !== false) close(); } catch (e) { error.textContent = e.message; error.hidden = false; }
+      finally { button.disabled = false; }
+    } }, el("h2", { text: title }), content, error,
+    el("div", { class: "confirm-actions" }, el("button", { type: "button", class: "btn", text: "Cancel", onclick: close }), button));
+    dialog.append(form); document.body.append(dialog);
+    dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+    dialog.showModal();
+    return { dialog, button, close };
+  }
+
+  function destinationFields(projectId = state.projectId, environmentId = state.environmentId) {
+    const project = el("select", { required: true, "aria-label": "Project" }, el("option", { value: "", text: "Choose a project" }), state.projects.map(p => el("option", { value: p.id, text: p.name })));
+    const environment = el("select", { required: true, "aria-label": "Environment" });
+    const update = () => {
+      const p = state.projects.find(p => p.id === project.value);
+      environment.replaceChildren(el("option", { value: "", text: "Choose an environment" }), ...(p?.environments || []).map(e => el("option", { value: e.id, text: `${e.name} · ${e.url || "URL not set"}` })));
+      if (p?.environments.some(e => e.id === environmentId)) environment.value = environmentId;
+      else if (p?.environments.length === 1) environment.value = p.environments[0].id;
+    };
+    project.value = projectId || ""; update(); project.addEventListener("change", update);
+    return { project, environment, body: el("div", { class: "destination-fields" }, el("label", {}, "Project", project), el("label", {}, "Environment", environment)) };
+  }
+
+  function environmentForm(project, existing) {
+    const name = el("input", { value: existing?.name || "Sandbox", required: true, maxlength: 80 });
+    const type = el("select", {}, el("option", { value: "sandbox", text: "Sandbox" }), el("option", { value: "production", text: "Production" }));
+    type.value = existing?.type || "sandbox";
+    type.addEventListener("change", () => { if (["Sandbox", "Production"].includes(name.value)) name.value = type.value === "sandbox" ? "Sandbox" : "Production"; });
+    const url = el("input", { type: "url", value: existing?.url || "", placeholder: "https://your-app.example/", maxlength: 2048 });
+    const projectInput = !project ? el("input", { required: true, maxlength: 80, placeholder: "e.g. Coro" }) : null;
+    formDialog(existing ? "Environment settings" : project ? `Add environment to ${project.name}` : "New project",
+      el("div", {}, projectInput ? el("label", {}, "Project name", projectInput) : null,
+        el("p", { class: "muted", text: "Projects contain environments. Each environment has its own application URL and tests." }),
+        el("label", {}, "Environment name", name), el("label", {}, "Environment type", type), el("label", {}, "Application URL", url),
+        el("p", { class: "muted", text: "Use a base URL without query parameters. You can set it later. Updating this setting does not rewrite saved tests." })), existing ? "Save settings" : project ? "Add environment" : "Create project", async () => {
+      const environment = { name: name.value, type: type.value, url: url.value.trim() };
+      const endpoint = !project ? "/api/projects" : `/api/projects/${project.id}/environments${existing ? `/${existing.id}` : ""}`;
+      const result = await api(endpoint, { method: existing ? "PUT" : "POST", body: JSON.stringify(project ? environment : { name: projectInput.value, environment }) });
+      state.projectId = project?.id || result.id; state.environmentId = project ? result.id : result.environments[0].id;
+      await loadFolders(); switchTab("tests"); toast(existing ? "Environment updated" : "Project environment ready", "ok");
+    });
+  }
+
   // ---------------------------------------------------------
   // Screenshot lightbox
   // ---------------------------------------------------------
@@ -237,6 +291,7 @@
   // ---------------------------------------------------------
 
   function switchTab(tab) {
+    if (state.recording || state.recordStarting) { toast("Add or discard your recording before leaving the editor."); return; }
     if (tab === "reports") { openReports(); return; }
     activateView(tab, tab === "overview" ? "empty" : `${tab}-panel`);
     location.hash = `view:${tab}`;
@@ -259,6 +314,15 @@
   function mobileNavigation(open) {
     const sidebar = document.querySelector(".sidebar");
     const mobile = window.matchMedia("(max-width: 760px)").matches;
+    if (!mobile) {
+      sidebar.inert = document.querySelector(".app").classList.contains("drawer-collapsed");
+      $("main-content").inert = false;
+      sidebar.classList.remove("nav-open");
+      $("nav-backdrop").hidden = true;
+      $("btn-mobile-browse").setAttribute("aria-expanded", String(!sidebar.inert));
+      $("btn-mobile-browse").setAttribute("aria-label", sidebar.inert ? "Open navigation" : "Hide navigation");
+      return;
+    }
     const wasOpen = sidebar.classList.contains("nav-open");
     open = mobile && open;
     sidebar.classList.toggle("nav-open", open);
@@ -272,7 +336,7 @@
   }
 
   // ---------------------------------------------------------
-  // Test library, organized into a virtual folder tree
+  // Projects, organized into a virtual folder tree
   // ---------------------------------------------------------
 
   async function loadTests() {
@@ -299,11 +363,12 @@
       el("span", { class: "activity-name" }, el("strong", { text: t.name || t.file }), el("small", { text: t.meta?.folder || "Unfiled" })),
       el("span", { class: "activity-time", text: t.lastRun ? fmtRelative(t.lastRun.startedAt) : "—" }),
       el("span", { class: `badge ${t.error ? "failed" : testStatus(t)}`, text: t.error ? "Invalid" : testStatus(t) === "none" ? "Not run" : testStatus(t) })
-    )) : [el("p", { class: "library-empty", text: "Start with your first test. Create one or import an existing test from the test library." })]));
+    )) : [el("p", { class: "library-empty", text: "Start with your first test. Create one or import an existing test from the projects." })]));
   }
 
   async function loadFolders() {
-    state.folders = await api("/api/folders");
+    const data = await api("/api/projects");
+    state.projects = data.projects; state.assignments = data.assignments; state.folders = [];
     renderTestList();
   }
 
@@ -317,40 +382,8 @@
       if (state.statusFilter === "attention") { if (!t.error && testStatus(t) !== "failed") return false; }
       else if (state.statusFilter !== "all" && testStatus(t) !== state.statusFilter) return false;
       if (!q) return true;
-      return [t.file, t.name || "", t.meta?.folder || ""].some(value => value.toLowerCase().includes(q));
+      return [t.file, t.name || "", t.meta?.folder || "", state.projects.find(p => p.id === assignmentFor(t.file).projectId)?.name || ""].some(value => value.toLowerCase().includes(q));
     });
-  }
-
-  function buildTree(tests, folders) {
-    const root = { name: "", path: "", folders: new Map(), tests: [] };
-    const ensure = path => {
-      if (!path) return root;
-      const segments = path.split("/");
-      let node = root;
-      let acc = "";
-      for (const seg of segments) {
-        acc = acc ? `${acc}/${seg}` : seg;
-        if (!node.folders.has(seg)) node.folders.set(seg, { name: seg, path: acc, folders: new Map(), tests: [] });
-        node = node.folders.get(seg);
-      }
-      return node;
-    };
-    for (const f of folders) ensure(f);
-    for (const t of tests) ensure(t.meta && t.meta.folder ? t.meta.folder : "").tests.push(t);
-    return root;
-  }
-
-  function countTests(node) {
-    let n = node.tests.length;
-    for (const f of node.folders.values()) n += countTests(f);
-    return n;
-  }
-
-  function pruneEmptyFolders(node) {
-    for (const [name, folder] of [...node.folders]) {
-      pruneEmptyFolders(folder);
-      if (countTests(folder) === 0) node.folders.delete(name);
-    }
   }
 
   function testRow(t, depth) {
@@ -374,163 +407,108 @@
     ));
   }
 
-  // The tree is two levels on purpose: a project, and the environments it runs
-  // against. Rendering every level identically and relying on indentation alone
-  // made it hard to tell a project from an environment from a test, so each
-  // level now looks like what it is.
-  const ENVIRONMENT_HINTS = [
-    { match: /prod/i, label: "production", tone: "prod" },
-    { match: /stag|uat|pre/i, label: "staging", tone: "stage" },
-    { match: /sand|dev|test|qa|local/i, label: "sandbox", tone: "sandbox" }
-  ];
-
-  function environmentTone(name) {
-    return ENVIRONMENT_HINTS.find(hint => hint.match.test(name)) || { label: "environment", tone: "neutral" };
+  function selectedProject() { return state.projects.find(p => p.id === state.projectId); }
+  function assignmentFor(file) { return state.assignments[file] || {}; }
+  function projectScope(test) {
+    const assignment = assignmentFor(test.file);
+    return (!state.projectId || assignment.projectId === state.projectId) && (!state.environmentId || assignment.environmentId === state.environmentId);
   }
-
-  function folderActions(path, node, kind) {
-    const actions = [];
-    if (can("tests.create")) {
-      actions.push(el("button", { class: "btn-icon", title: `New test in ${path}`, "aria-label": `New test in ${path}`, onclick: () => createTest(path) }, "+"));
-    }
-    if (kind === "project" && can("folders.manage")) {
-      actions.push(el("button", { class: "btn-icon", title: `New environment in ${path}`, "aria-label": `New environment in ${path}`, onclick: () => createEnvironment(path) }, "⊞"));
-    }
-    if (can("folders.manage") && countTests(node) === 0) {
-      actions.push(el("button", { class: "btn-icon", title: `Delete empty ${kind} ${path}`, "aria-label": `Delete empty ${kind} ${path}`, onclick: () => deleteFolder(path) }, "✕"));
-    }
-    return el("div", { class: "folder-actions" }, actions);
-  }
-
-  function groupRow(node, kind) {
-    const collapsed = state.collapsedFolders.has(node.path);
-    const count = countTests(node);
-    const tone = kind === "environment" ? environmentTone(node.name) : null;
-
-    return el("li", { class: `tree-row tree-${kind}${collapsed ? " collapsed" : ""}` },
-      el("button", {
-        class: "tree-disclosure",
-        "data-folder": node.path,
-        "aria-expanded": String(!collapsed),
-        "aria-label": `${collapsed ? "Expand" : "Collapse"} ${kind} ${node.path}`,
-        onclick: () => toggleFolder(node.path)
-      },
-        el("span", { class: "tree-caret", "aria-hidden": "true", text: collapsed ? "▸" : "▾" }),
-        el("span", { class: `tree-icon tree-icon-${kind}`, "aria-hidden": "true", text: kind === "project" ? "◆" : "●" }),
-        el("span", { class: "tree-label", text: node.name }),
-        tone ? el("span", { class: `env-tag env-${tone.tone}`, text: tone.label }) : null,
-        el("span", { class: "tree-count", text: `${count}` })
-      ),
-      folderActions(node.path, node, kind)
-    );
-  }
-
-  function renderFolderNode(node, depth) {
-    const rows = [];
-    const kind = depth === 0 ? "project" : "environment";
-    const sortedFolders = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
-
-    for (const folder of sortedFolders) {
-      rows.push(groupRow(folder, kind));
-      if (state.collapsedFolders.has(folder.path)) continue;
-
-      const children = renderFolderNode(folder, depth + 1);
-      if (children.length) {
-        rows.push(el("li", { class: `tree-children tree-children-${kind}` }, el("ul", { class: "tree-sublist" }, children)));
-      } else {
-        rows.push(el("li", { class: `tree-children tree-children-${kind}` },
-          el("p", { class: "tree-empty" },
-            kind === "project" ? "No environments yet. " : "No tests here yet. ",
-            can(kind === "project" ? "folders.manage" : "tests.create")
-              ? el("button", {
-                  class: "btn-link",
-                  onclick: () => (kind === "project" ? createEnvironment(folder.path) : createTest(folder.path))
-                }, kind === "project" ? "Add an environment" : "Add a test")
-              : null
-          )));
-      }
-    }
-
-    const sortedTests = [...node.tests].sort((a, b) => (a.name || a.file).localeCompare(b.name || b.file));
-    for (const t of sortedTests) rows.push(testRow(t, 0));
-    return rows;
-  }
-  function toggleFolder(path) {
-    if (state.collapsedFolders.has(path)) state.collapsedFolders.delete(path);
-    else state.collapsedFolders.add(path);
-    renderTestList();
-    [...document.querySelectorAll(".folder-toggle")].find(button => button.dataset.folder === path)?.focus();
-  }
-
-  function revealMatches() {
-    for (const test of visibleTests()) {
-      let folder = test.meta?.folder || "";
-      while (folder) {
-        state.collapsedFolders.delete(folder);
-        folder = folder.includes("/") ? folder.slice(0, folder.lastIndexOf("/")) : "";
-      }
-    }
-  }
-
   function renderTestList() {
-    const list = $("test-tree");
-    list.replaceChildren();
-    $("nav-test-count").textContent = state.tests.length;
-    $("library-count").textContent = state.tests.length;
-    $("library-summary").replaceChildren(document.createTextNode(`${visibleTests().length} of ${state.tests.length} tests${state.statusFilter === "attention" ? " · Needs attention" : ""}`));
-    if (state.statusFilter !== "all" || state.search) $("library-summary").append(el("button", { class: "btn-link", text: "Clear filters", onclick: () => { state.statusFilter = "all"; state.search = ""; $("test-search").value = ""; renderTestList(); } }));
-
+    const project = selectedProject();
+    const scope = state.tests.filter(projectScope);
+    const visible = visibleTests().filter(projectScope);
+    $("nav-test-count").textContent = state.projects.length;
+    $("library-count").textContent = state.projects.length;
+    $("project-grid").replaceChildren(...state.projects.map(p => {
+      const tests = state.tests.filter(t => assignmentFor(t.file).projectId === p.id);
+      const failures = tests.filter(t => testStatus(t) === "failed").length;
+      return el("button", { class: `project-card${p.id === state.projectId ? " selected" : ""}`, "aria-label": `Open project ${p.name}`, "aria-pressed": String(p.id === state.projectId), onclick: () => {
+        state.projectId = p.id; state.environmentId = ""; renderTestList();
+      } }, el("span", { class: "project-card-icon", "aria-hidden": "true", text: p.name.slice(0, 2).toUpperCase() }),
+      el("strong", { text: p.name }), el("span", { class: "muted", text: `${p.environments.length} environments · ${tests.length} tests` }),
+      el("span", { class: failures ? "project-attention" : "project-ready", text: failures ? `${failures} need attention` : tests.length ? "Ready to explore →" : "Add your first environment →" }));
+    }));
+    const heading = $("project-context");
+    heading.replaceChildren(el("div", {}, el("span", { class: "eyebrow", text: project ? "PROJECT / ENVIRONMENTS" : "ACROSS YOUR WORKSPACE" }), el("h2", { text: project?.name || "All tests" })),
+      el("div", { class: "page-actions" }, project ? el("button", { class: "btn", text: "All projects", onclick: () => { state.projectId = ""; state.environmentId = ""; renderTestList(); } }) : null,
+        project && can("folders.manage") ? el("button", { class: "btn", text: "+ Add environment", onclick: () => environmentForm(project) }) : null));
+    $("environment-list").replaceChildren(...(project ? [el("button", { class: `environment-card${!state.environmentId ? " selected" : ""}`, "aria-pressed": String(!state.environmentId), onclick: () => { state.environmentId = ""; renderTestList(); } }, el("strong", { text: "All environments" }), el("span", { text: `${state.tests.filter(t => assignmentFor(t.file).projectId === project.id).length} tests` })), ...project.environments.map(environment =>
+      el("div", { class: `environment-card${state.environmentId === environment.id ? " selected" : ""}` },
+        el("button", { class: "environment-select", "aria-label": `Open environment ${environment.name}`, "aria-pressed": String(state.environmentId === environment.id), onclick: () => { state.environmentId = environment.id; renderTestList(); } },
+          el("strong", { text: environment.name }), el("span", { class: `environment-type ${environment.type}`, text: environment.type }), el("span", { class: "environment-url", text: environment.url || "Application URL not set" })),
+        can("folders.manage") ? el("button", { class: "btn-link", "aria-label": `Settings for ${environment.name}`, text: "Settings", onclick: () => environmentForm(project, environment) }) : null))] : []));
+    $("environment-list").hidden = !project;
     for (const chip of document.querySelectorAll("#status-filter .chip")) {
-      const count = chip.dataset.filter === "all"
-        ? state.tests.length
-        : state.tests.filter(t => testStatus(t) === chip.dataset.filter).length;
-      chip.textContent = `${chip.dataset.filter === "none" ? "Not run" : chip.dataset.filter[0].toUpperCase() + chip.dataset.filter.slice(1)} ${count}`;
-      chip.classList.toggle("active", chip.dataset.filter === state.statusFilter);
-      chip.setAttribute("aria-pressed", String(chip.dataset.filter === state.statusFilter));
+      const key = chip.dataset.filter;
+      const count = key === "all" ? scope.length : scope.filter(t => testStatus(t) === key).length;
+      chip.textContent = `${key === "none" ? "Not run" : key[0].toUpperCase() + key.slice(1)} ${count}`;
+      chip.classList.toggle("active", key === state.statusFilter); chip.setAttribute("aria-pressed", String(key === state.statusFilter));
     }
-
-    if (!state.tests.length && !state.folders.length) {
-      list.append(el("li", { class: "library-empty", text: "No tests yet. Create a test or import your existing JSON to get started." }));
-      return;
-    }
-
-    const filtering = Boolean(state.search.trim()) || state.statusFilter !== "all";
-    const visible = visibleTests();
-    const tree = buildTree(visible, state.folders);
-    if (filtering) pruneEmptyFolders(tree);
-
-    const rows = renderFolderNode(tree, 0);
-    if (!rows.length) {
-      list.append(el("li", { class: "library-empty", text: "No matching tests. Try a different search or clear your filters." }));
-      return;
-    }
-    for (const r of rows) list.append(r);
+    $("test-tree").replaceChildren(...visible.sort((a, b) => (a.name || a.file).localeCompare(b.name || b.file)).map(t => testRow(t, 0)));
+    if (!visible.length) $("test-tree").append(el("li", { class: "library-empty", text: scope.length ? "No matching tests. Clear the filters to see all tests." : project ? "No tests in this environment yet. Create a test, import JSON, or move an existing test here." : "Create a project to organize your first tests." }));
+    $("library-summary").replaceChildren(document.createTextNode(`${visible.length} of ${scope.length} tests`));
+    if (state.statusFilter !== "all" || state.search) $("library-summary").append(el("button", { class: "btn-link", text: "Clear filters", onclick: () => { state.statusFilter = "all"; state.search = ""; $("test-search").value = ""; renderTestList(); } }));
   }
 
-  async function createFolder(parentPath) {
-    const raw = await promptDialog("Folder name:", { title: "New folder", okLabel: "Create" });
-    if (!raw || !raw.trim()) return;
-    const full = parentPath ? `${parentPath}/${raw.trim()}` : raw.trim();
-    try {
-      await api("/api/folders", { method: "POST", body: JSON.stringify({ path: full }) });
-      await loadFolders();
-      toast(`Created folder ${full}`, "ok");
-    } catch (e) {
-      toast(e.message, "error");
+  async function createTest() {
+    if (state.dirty && !(await confirmDialog("Discard unsaved test changes before creating another test?", { okLabel: "Discard", danger: true }))) return;
+    await loadFolders();
+    if (!state.projects.some(p => p.environments.length)) {
+      if (can("folders.manage")) { environmentForm(selectedProject()); return; }
+      toast("Ask an administrator to add a project environment first.", "error"); return;
     }
+    const name = el("input", { required: true, maxlength: 160, placeholder: "e.g. Partner sign-in", value: "New test" });
+    const fields = destinationFields();
+    formDialog("New test", el("div", {}, el("label", {}, "Test name", name), fields.body,
+      el("p", { class: "muted", text: "Start with your environment URL, then record the screen or add steps. A unique filename is created automatically." })), "Create test", async () => {
+      const created = await api("/api/tests", { method: "POST", body: JSON.stringify({ name: name.value, projectId: fields.project.value, environmentId: fields.environment.value }) });
+      state.projectId = fields.project.value; state.environmentId = fields.environment.value;
+      await Promise.all([loadTests(), loadFolders()]); await openTest(created.file, { force: true }); toast("Test created. Record your screen or add a step.", "ok");
+    });
   }
 
-  async function deleteFolder(path) {
-    const ok = await confirmDialog(`Delete the empty folder "${path}"?`, { title: "Delete folder", okLabel: "Delete", danger: true });
-    if (!ok) return;
-    try {
-      await api(`/api/folders?path=${encodeURIComponent(path)}`, { method: "DELETE" });
-      await loadFolders();
-      toast("Folder deleted", "ok");
-    } catch (e) {
-      toast(e.message, "error");
-    }
+  async function moveToFolder() {
+    if (!state.file) return;
+    if (state.dirty && !(await saveTest())) return;
+    await loadFolders();
+    const assignment = assignmentFor(state.file);
+    const fields = destinationFields(assignment.projectId, assignment.environmentId);
+    const preview = el("div", { class: "move-preview", "aria-live": "polite" });
+    const adapt = el("input", { type: "checkbox", checked: true });
+    let plan = null;
+    const body = () => ({ projectId: fields.project.value, environmentId: fields.environment.value });
+    const form = formDialog("Move test · AI adaptation", el("div", {}, fields.body, preview), "Review changes", async () => {
+      if (!plan) {
+        plan = await api(`/api/tests/${encodeURIComponent(state.file)}/move-preview`, { method: "POST", body: JSON.stringify(body()) });
+        preview.replaceChildren(el("h3", { text: `${plan.changes.length} URL changes proposed` }),
+          ...plan.changes.map(change => el("div", { class: "move-change" }, el("strong", { text: `Step ${change.step}` }), el("del", { text: change.before }), el("ins", { text: change.after }))),
+          el("label", { class: "checkbox-row" }, adapt, "Apply the proposed URL changes when moving"),
+          el("h3", { text: "Review before running" }), el("ul", {}, plan.review.map(text => el("li", { text }))),
+          el("p", { class: "muted", text: "Moving does not run the test. Selectors, input values and assertions remain available for review." }));
+        if (plan.aiAvailable && can("ai.analyze")) {
+          const result = el("p", { class: "ai-adaptation", "aria-live": "polite" });
+          const ai = el("button", { type: "button", class: "btn ai-btn", text: "Ask AI for a review", onclick: async () => {
+            ai.disabled = true; result.textContent = "Reviewing the test structure…";
+            try { const data = await api(`/api/tests/${encodeURIComponent(state.file)}/move-analysis`, { method: "POST", body: JSON.stringify({ ...body(), revision: plan.revision }) }); result.textContent = data.advice; }
+            catch (e) { result.textContent = e.message; } finally { ai.disabled = false; }
+          } });
+          preview.append(ai, el("p", { class: "muted", text: "AI receives action types and counts. Test inputs and credentials stay local." }), result);
+        } else preview.append(el("p", { class: "muted", text: "AI review is unavailable. Configure the provider and AI access to enable it. The URL preview above is ready to use." }));
+        fields.project.disabled = true; fields.environment.disabled = true;
+        preview.append(el("button", { type: "button", class: "btn-link", text: "Change destination / refresh preview", onclick: () => {
+          plan = null; preview.replaceChildren(); fields.project.disabled = false; fields.environment.disabled = false; form.button.textContent = "Review changes";
+        } }));
+        form.button.textContent = "Move test";
+        // Keep the review open until the user explicitly applies it.
+        return false;
+      }
+      const updated = await api(`/api/tests/${encodeURIComponent(state.file)}/move`, { method: "POST", body: JSON.stringify({ ...body(), revision: plan.revision, adaptUrls: adapt.checked }) });
+      state.test = updated; state.projectId = fields.project.value; state.environmentId = fields.environment.value;
+      setDirty(false); await Promise.all([loadTests(), loadFolders()]); renderSteps(); renderTestMeta(); toast(`Moved to ${plan.project} / ${plan.environment.name}`, "ok");
+    });
   }
+
+  function revealMatches() {}
 
   // ---------------------------------------------------------
   // Access mode (view vs edit, based on sharing settings)
@@ -543,6 +521,7 @@
     $("btn-save").disabled = readOnly;
     $("btn-move-folder").disabled = readOnly || !can("folders.manage");
     $("btn-record").hidden = readOnly || !can("tests.create");
+    $("btn-record-screen").hidden = readOnly || !can("tests.create");
     $("access-badge").hidden = !readOnly;
 
     const isOwnerOrAdmin = ["admin", "site_admin"].includes(state.user.role) ||
@@ -554,7 +533,10 @@
 
   function renderTestMeta() {
     const meta = state.test.meta || {};
-    $("btn-move-folder").textContent = meta.folder ? `📁 ${meta.folder}` : "📁 No folder";
+    const assignment = assignmentFor(state.file);
+    const project = state.projects.find(p => p.id === assignment.projectId);
+    const environment = project?.environments.find(e => e.id === assignment.environmentId);
+    $("btn-move-folder").textContent = project ? `${project.name} / ${environment?.name || "Choose environment"} · Move` : "Move to project";
   }
 
   // ---------------------------------------------------------
@@ -562,6 +544,7 @@
   // ---------------------------------------------------------
 
   async function openTest(file, { force = false } = {}) {
+    if (state.recording && file !== state.file) { toast("Add or discard this recording before opening another test.", "error"); return; }
     if (!force && file === state.file && state.test) {
       activateView("tests", "workspace");
       location.hash = encodeURIComponent(file);
@@ -575,6 +558,9 @@
       return;
     }
     state.file = file;
+    $("record-modal").hidden = true;
+    $("workspace").classList.remove("is-recording");
+    state.expandedStep = 0;
     setDirty(false);
     location.hash = encodeURIComponent(file);
     activateView("tests", "workspace");
@@ -592,39 +578,6 @@
     testPanel.kind = "test";
     detachRun(testPanel);
     await loadHistory(testPanel, { autoOpenLatest: true });
-  }
-
-  // Offer a name that is actually free. Suggesting "new-test.json" when one
-  // already exists made every second test start with an error.
-  function freeTestName(base) {
-    const taken = new Set(state.tests.map(t => t.file.toLowerCase()));
-    if (!taken.has(`${base}.json`)) return `${base}.json`;
-    for (let n = 2; n < 500; n++) {
-      const candidate = `${base}-${n}.json`;
-      if (!taken.has(candidate)) return candidate;
-    }
-    return `${base}-${Date.now()}.json`;
-  }
-
-  async function createTest(folder) {
-    if (state.dirty && !(await confirmDialog("Discard unsaved test changes before creating another test?", { okLabel: "Discard", danger: true }))) return;
-    const raw = await promptDialog(folder ? `Name for the new test in ${folder}:` : "Name for the new test:", {
-      title: "New test",
-      okLabel: "Create",
-      defaultValue: freeTestName("new-test")
-    });
-    if (!raw) return;
-    try {
-      const created = await api("/api/tests", {
-        method: "POST",
-        body: JSON.stringify({ file: raw.trim(), name: raw.trim().replace(/\.json$/i, ""), folder: folder || undefined })
-      });
-      await Promise.all([loadTests(), loadFolders()]);
-      await openTest(created.file, { force: true });
-      toast(`Created ${created.file}`, "ok");
-    } catch (e) {
-      toast(e.message, "error");
-    }
   }
 
   async function saveTest() {
@@ -651,31 +604,9 @@
       $("test-validation").hidden = false;
       const match = /Step (\d+)/.exec(e.message);
       const card = match && $("steps").children[Number(match[1]) - 1];
-      if (card) { card.classList.add("invalid"); card.scrollIntoView({ block: "nearest" }); card.querySelector("input, select")?.focus(); }
+      if (card) { card.classList.add("invalid"); card.classList.remove("step-collapsed"); card.scrollIntoView({ block: "nearest" }); card.querySelector("input, select")?.focus(); }
       toast(e.message, "error");
       return false;
-    }
-  }
-
-  async function moveToFolder() {
-    if (!state.file) return;
-    const current = (state.test.meta && state.test.meta.folder) || "";
-    const raw = await promptDialog(
-      "Folder path (leave empty for no folder). Use / to nest, e.g. Sales/Deals:",
-      { title: "Move to folder", okLabel: "Move", defaultValue: current }
-    );
-    if (raw === null) return;
-    try {
-      const res = await api(`/api/tests/${encodeURIComponent(state.file)}/folder`, {
-        method: "PUT",
-        body: JSON.stringify({ folder: raw.trim() })
-      });
-      state.test.meta = res.meta;
-      renderTestMeta();
-      await Promise.all([loadTests(), loadFolders()]);
-      toast(raw.trim() ? `Moved to ${raw.trim()}` : "Moved to root", "ok");
-    } catch (e) {
-      toast(e.message, "error");
     }
   }
 
@@ -862,6 +793,53 @@
     return el("div", { class: `field${wide ? " span-2" : ""}` }, label, input);
   }
 
+  // What this specific step does, in plain words.
+  function noteField(step, index) {
+    const input = el("input", {
+      type: "text",
+      class: "wide",
+      placeholder: "Describe this step in your own words (optional)",
+      autocomplete: "off"
+    });
+    input.value = step.note ?? "";
+    input.addEventListener("input", () => {
+      if (input.value.trim() === "") delete state.test.steps[index].note;
+      else state.test.steps[index].note = input.value;
+      setDirty(true);
+      const row = input.closest(".step-card")?.querySelector(".step-desc");
+      if (row) {
+        const text = stepDescription(state.test.steps[index], state.actionMap.get(String(step.action || "").toLowerCase()));
+        row.textContent = text;
+        row.title = text;
+        row.classList.toggle("step-desc-authored", Boolean(state.test.steps[index].note));
+      }
+    });
+    return el("div", { class: "field span-2" },
+      el("label", {}, "Description"),
+      input
+    );
+  }
+
+  function stepDescription(step, spec) {
+    if (step.note) return step.note;
+
+    const target = step.selector || step.url || step.text || step.key || "";
+    const value = step.value !== undefined && step.value !== "" ? ` with "${step.value}"` : "";
+    if (target) {
+      const verb = {
+        navigate: "Go to", click: "Click", "double-click": "Double-click", "right-click": "Right-click",
+        fill: "Type into", type: "Type into", clear: "Clear", select: "Choose in", check: "Check",
+        uncheck: "Uncheck", hover: "Hover over", focus: "Focus", press: "Press a key in",
+        visible: "Expect visible:", hidden: "Expect hidden:", exists: "Expect present:",
+        "element-text": "Expect text of", "element-text-contains": "Expect text in",
+        "text-visible": "Expect text", "wait-for-selector": "Wait for"
+      }[String(step.action || "").toLowerCase()] || "";
+      return `${verb} ${target}${value}`.trim();
+    }
+    if (step.timeout) return `Wait ${step.timeout} ms`;
+    return spec ? spec.description : "Not in the action catalog";
+  }
+
   function stepCard(step, index) {
     const name = String(step.action || "").toLowerCase();
     const spec = state.actionMap.get(name);
@@ -877,6 +855,10 @@
       if (key === "action" || shown.has(key)) continue;
       body.append(fieldInput(step, key, false, index));
     }
+    // Authoring a description is part of writing a readable test, so it is a
+    // first-class field rather than something only importers can set.
+    body.append(noteField(step, index));
+
     if (!body.childElementCount) {
       body.append(el("div", { class: "muted", text: "This action takes no parameters." }));
     }
@@ -898,9 +880,21 @@
     };
 
     const head = el("div", { class: "step-head" },
+      el("button", { class: "btn-icon step-expand", "aria-label": `Toggle step ${index + 1} details`, "aria-expanded": String(index === state.expandedStep || (state.expandedStep === undefined && index === 0)), text: "⌄", onclick: event => {
+        const card = event.currentTarget.closest(".step-card");
+        card.classList.toggle("step-collapsed"); event.currentTarget.setAttribute("aria-expanded", String(!card.classList.contains("step-collapsed")));
+        state.expandedStep = index;
+      } }),
       el("span", { class: "step-index", text: String(index + 1) }),
       select,
-      el("span", { class: "step-desc", text: spec ? spec.description : "Not in the action catalog" }),
+      // A row of identical "Click an element" text says nothing about the test.
+      // Prefer the step's own description, then what it actually targets, and
+      // only fall back to the catalog wording when there is nothing better.
+      el("span", {
+        class: `step-desc${step.note ? " step-desc-authored" : ""}`,
+        title: stepDescription(step, spec),
+        text: stepDescription(step, spec)
+      }),
       el("div", { class: "step-tools" },
         el("button", { class: "btn-icon", title: "Move up", disabled: index === 0, onclick: () => move(index, index - 1) }, "↑"),
         el("button", { class: "btn-icon", title: "Move down", disabled: index === state.test.steps.length - 1, onclick: () => move(index, index + 1) }, "↓"),
@@ -917,11 +911,13 @@
       )
     );
 
-    return el("div", { class: "step-card" }, head, body);
+    return el("div", { class: `step-card${index === state.expandedStep || (state.expandedStep === undefined && index === 0) ? "" : " step-collapsed"}` }, head, body,
+      el("button", { class: "btn-link record-after", text: "Record after this step", onclick: () => openRecordModal(index + 1) }));
   }
 
   function addStep() {
     state.test.steps.push({ action: "click", selector: "" });
+    state.expandedStep = state.test.steps.length - 1;
     setDirty(true);
     renderSteps();
     const container = $("steps");
@@ -964,6 +960,7 @@
   function pel(panel, key) { return $(panel.ids[key]); }
 
   function detachRun(panel) {
+    panel.frame = null;
     if (panel.runSource) {
       panel.runSource.close();
       panel.runSource = null;
@@ -1000,6 +997,11 @@
       panel.run.log.push(line);
       appendLog(panel, line);
     });
+    source.addEventListener("frame", e => {
+      if (!panel.run || panel.run.status !== "running") return;
+      panel.frame = JSON.parse(e.data);
+      if (panel.follow) renderViewer(panel);
+    });
     source.addEventListener("done", e => {
       const done = JSON.parse(e.data);
       if (panel.run) Object.assign(panel.run, done, { log: panel.run.log });
@@ -1032,18 +1034,27 @@
     pel(panel, "btnStop").hidden = !running || !can(panel.kind === "suite" ? "suites.run" : "tests.run") || (run.startedBy !== state.user.username && !["admin", "site_admin"].includes(state.user.role));
 
     const passedCount = run.steps.filter(s => s.status === "passed").length;
-    pel(panel, "runStatus").replaceChildren(
+    pel(panel, "runStatus").replaceChildren(...[
       el("span", { class: `badge ${run.status}`, text: run.status }),
       el("span", { text: `${passedCount}/${run.steps.length} steps` }),
       el("span", { text: running ? `started ${fmtRelative(run.startedAt)}` : fmtMs(run.durationMs), title: fmtTime(run.startedAt) }),
       run.startedBy ? el("span", { text: `by ${run.startedBy}` }) : null,
       run.error ? el("span", { class: "validation-message", text: run.error }) : null,
       !running && run.kind !== "suite" ? el("a", { href: `/runs/${encodeURIComponent(run.id)}/report/index.html`, target: "_blank", rel: "noopener", text: "HTML report ↗" }) : null
-    );
+    ].filter(Boolean));
 
     if (panel.follow) {
       const active = [...run.steps].reverse().find(s => s.status !== "pending");
       if (active) panel.selectedStep = active.index;
+    }
+    if (panel === testPanel) {
+      $("btn-follow-run").textContent = running ? (panel.follow ? "Following live" : "Follow live") : "Latest step";
+      $("btn-follow-run").setAttribute("aria-pressed", String(panel.follow));
+      for (const [index, card] of [...$("steps").children].entries()) card.classList.toggle("run-current", index + 1 === panel.selectedStep);
+      if (running && panel.follow && panel.scrolledStep !== panel.selectedStep) {
+        panel.scrolledStep = panel.selectedStep;
+        $("steps").children[panel.selectedStep - 1]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
     }
 
     const list = pel(panel, "runSteps");
@@ -1058,6 +1069,8 @@
       list.append(
         el("li", {
           class: `run-step ${step.status}${panel.selectedStep === step.index ? " selected" : ""}`,
+          role: "button", tabindex: 0, "aria-label": `View step ${step.index}: ${step.action}, ${step.status}`,
+          onkeydown: event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); panel.follow = false; panel.selectedStep = step.index; renderRun(panel); } },
           onclick: () => { panel.follow = false; panel.selectedStep = step.index; renderRun(panel); }
         },
           el("span", { class: "icon", text: ICONS[step.status] || "" }),
@@ -1091,14 +1104,22 @@
     pel(panel, "viewerTitle").textContent = `${prefix}Step ${step.index} · ${step.action} · ${step.status}` +
       (step.durationMs !== undefined ? ` · ${fmtMs(step.durationMs)}` : "");
 
-    if (step.screenshot) {
+    const liveFrame = panel.follow && run.status === "running" && panel.frame;
+    if (panel === testPanel) {
+      $("playback-address").hidden = !liveFrame;
+      $("playback-address").textContent = liveFrame ? liveFrame.url : "";
+    }
+    if (liveFrame) {
+      img.src = `data:image/jpeg;base64,${liveFrame.image}`;
+      img.hidden = false; empty.hidden = true;
+    } else if (step.screenshot) {
       img.src = `/runs/${encodeURIComponent(run.id)}/${encodeURIComponent(step.screenshot)}`;
       img.hidden = false;
       empty.hidden = true;
     } else {
       img.hidden = true;
       empty.hidden = false;
-      empty.textContent = step.status === "running" ? "Running… screenshot arrives when the step finishes."
+      empty.textContent = step.status === "running" ? "Connecting to the running browser…"
         : step.status === "pending" ? "Not started yet."
         : step.status === "skipped" ? "Skipped because an earlier step failed."
         : "No screenshot was captured for this step.";
@@ -1777,7 +1798,7 @@
   function renderProjectTable(container, rows) {
     container.replaceChildren();
     if (!rows.length) {
-      container.append(el("div", { class: "muted", text: "No projects yet. Group tests into folders to see them here." }));
+      container.append(el("div", { class: "muted", text: "No project runs yet. Run a test in a project to see its results here." }));
       return;
     }
     const table = el("table", { class: "report-table" },
@@ -1955,88 +1976,25 @@
   // One bad file must not abandon the rest of the batch.
   async function importTestFiles(files) {
     if (!files.length) return;
-    if (files.length === 1) return importTestFile(files[0]);
-
     if (state.dirty && !(await confirmDialog("Discard unsaved test changes before importing?", { okLabel: "Discard", danger: true }))) return;
-
-    const folder = await promptDialog(
-      `Import ${files.length} files into which folder? Leave empty for no folder. Use / to nest, e.g. Reflect/Anomali:`,
-      { title: `Import ${files.length} tests`, okLabel: "Import", defaultValue: "" }
-    );
-    if (folder === null) return;
-
-    const imported = [];
-    const failed = [];
-    let skippedSteps = 0;
-
-    toast(`Importing ${files.length} files…`);
-    for (const file of files) {
-      let parsed;
-      try {
-        parsed = JSON.parse(await file.text());
-      } catch {
-        failed.push({ name: file.name, reason: "not valid JSON" });
-        continue;
+    await loadFolders();
+    const fields = destinationFields();
+    formDialog("Import tests", el("div", {}, el("p", { class: "muted", text: files.length + " JSON files selected. Choose their project and environment. Original URLs are retained for review." }), fields.body), "Import tests", async () => {
+      const imported = [], failed = [];
+      let skipped = 0;
+      for (const file of files) {
+        try {
+          const content = JSON.parse(await file.text());
+          const result = await api("/api/tests/import", { method: "POST", body: JSON.stringify({ file: file.name, content, projectId: fields.project.value, environmentId: fields.environment.value }) });
+          imported.push(result.file); skipped += result.skipped?.length || 0;
+        } catch (e) { failed.push(file.name + ": " + e.message); }
       }
-      try {
-        const res = await api("/api/tests/import", {
-          method: "POST",
-          body: JSON.stringify({ file: file.name, content: parsed, folder: folder.trim() || undefined })
-        });
-        skippedSteps += (res.skipped || []).length;
-        imported.push({ name: file.name, file: res.file, steps: res.imported, format: res.format, skipped: res.skipped || [] });
-      } catch (e) {
-        failed.push({ name: file.name, reason: e.message });
-      }
-    }
-
-    await Promise.all([loadTests(), loadFolders()]);
-    if (imported.length) await openTest(imported[0].file, { force: true });
-
-    const parts = [`Imported ${imported.length} of ${files.length} files`];
-    if (skippedSteps) parts.push(`${skippedSteps} steps could not be mapped`);
-    if (failed.length) parts.push(`${failed.length} failed`);
-    toast(parts.join(" · "), failed.length ? "error" : "ok");
-
-    // The detail matters when a batch is partly rejected, so keep it inspectable.
-    console.info("Import summary", { imported, failed });
-    if (failed.length) {
-      await showDialog({
-        title: "Import finished with problems",
-        message:
-          `${imported.length} of ${files.length} files imported.\n\n` +
-          failed.map(f => `${f.name}: ${f.reason}`).join("\n").slice(0, 1200),
-        okLabel: "Close"
-      });
-    }
-  }
-
-  async function importTestFile(file) {
-    if (state.dirty && !(await confirmDialog("Discard unsaved test changes before importing another test?", { okLabel: "Discard", danger: true }))) return;
-    let parsed;
-    try {
-      parsed = JSON.parse(await file.text());
-    } catch {
-      toast("That file is not valid JSON.", "error");
-      return;
-    }
-    try {
-      const res = await api("/api/tests/import", {
-        method: "POST",
-        body: JSON.stringify({ file: file.name, content: parsed })
-      });
+      state.projectId = fields.project.value; state.environmentId = fields.environment.value;
       await Promise.all([loadTests(), loadFolders()]);
-      await openTest(res.file, { force: true });
-      const skipped = res.skipped && res.skipped.length
-        ? ` ${res.skipped.length} step${res.skipped.length === 1 ? "" : "s"} could not be mapped.`
-        : "";
-      toast(`Imported ${res.imported} steps from ${res.format}.${skipped}`, "ok");
-      if (skipped) {
-        console.info("Skipped steps:", res.skipped);
-      }
-    } catch (e) {
-      toast(e.message, "error");
-    }
+      if (imported.length) await openTest(imported[0], { force: true });
+      toast(imported.length + " imported · " + failed.length + " failed · " + skipped + " steps need review", failed.length ? "error" : "ok");
+      if (failed.length) setTimeout(() => showDialog({ title: "Import results", message: failed.join("\n").slice(0, 1800), okLabel: "Close" }), 0);
+    });
   }
 
   function exportTest() {
@@ -2062,16 +2020,29 @@
   // Recorder
   // ---------------------------------------------------------
 
-  function openRecordModal() {
+  function openRecordModal(insertAt) {
     if (!state.file) return;
+    if (state.recording || state.recordStarting) { $("record-modal").hidden = false; return; }
     resetRecordModal();
+    $("workspace").classList.add("is-recording");
     $("record-modal").hidden = false;
+    const count = state.test.steps.length;
+    $("record-insert").replaceChildren(...Array.from({ length: count + 1 }, (_, i) => el("option", { value: i, text: i === 0 ? "Before the first step" : `After step ${i}${i === count ? " (at the end)" : ""}` })));
+    $("record-insert").value = Number.isInteger(insertAt) ? Math.min(insertAt, count) : count;
+    $("record-skip-navigation").checked = count > 0;
+    const assignment = assignmentFor(state.file);
+    const environment = state.projects.find(p => p.id === assignment.projectId)?.environments.find(e => e.id === assignment.environmentId);
+    $("record-url").value = environment?.url || state.test.steps.find(step => step.action === "navigate")?.url || "";
     $("record-url").focus();
   }
 
   function resetRecordModal() {
     stopRecordStream();
     state.recording = null;
+    state.recordViewport = null;
+    $("record-screen-img").removeAttribute("src");
+    $("record-screen-loading").hidden = false;
+    $("record-screen-loading").textContent = "Connecting to browser…";
     $("record-setup").hidden = false;
     $("record-live").hidden = true;
     $("record-error").hidden = true;
@@ -2082,7 +2053,9 @@
     $("record-replace").checked = false;
   }
 
-  function closeRecordModal() {
+  async function closeRecordModal() {
+    if (state.recordStarting) { toast("The browser is opening. Wait for it before closing."); return; }
+    if (state.recording?.steps.length && !(await confirmDialog("Discard these recorded steps? Your existing test draft will be kept.", { okLabel: "Discard recording" }))) return;
     // Leave the browser running only if the user is still recording on purpose;
     // closing the panel should not silently abandon a live session.
     if (state.recording && state.recording.status === "recording") {
@@ -2090,132 +2063,42 @@
     }
     stopRecordStream();
     $("record-modal").hidden = true;
+    $("workspace").classList.remove("is-recording");
     state.recording = null;
-  }
-
-  // ---------------------------------------------------------
-  // Live screen: frames in, clicks and keystrokes back out
-  // ---------------------------------------------------------
-
-  function stopScreen() {
-    if (state.screenSource) {
-      state.screenSource.close();
-      state.screenSource = null;
-    }
-    const img = $("record-screen-img");
-    if (img) img.removeAttribute("src");
-  }
-
-  function startScreen(id) {
-    stopScreen();
-    const img = $("record-screen-img");
-    const hint = $("record-screen-hint");
-    const stateLabel = $("record-screen-state");
-    if (!img) return;
-
-    stateLabel.textContent = "connecting…";
-    const source = new EventSource(`/api/screen/${encodeURIComponent(id)}/events`);
-    state.screenSource = source;
-
-    source.addEventListener("frame", e => {
-      const frame = JSON.parse(e.data);
-      img.src = `data:image/jpeg;base64,${frame.data}`;
-      img.dataset.w = frame.width;
-      img.dataset.h = frame.height;
-      hint.hidden = true;
-      stateLabel.textContent = "live · click and type to drive it";
-    });
-    source.onerror = () => {
-      stateLabel.textContent = state.recording && state.recording.status === "recording"
-        ? "reconnecting…"
-        : "screen closed";
-    };
-  }
-
-  // Coordinates go out normalized so the panel can be any size and the page
-  // still receives the click where it was aimed.
-  function screenPoint(event) {
-    const img = $("record-screen-img");
-    const rect = img.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
-    return {
-      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
-    };
-  }
-
-  async function sendInteraction(body) {
-    if (!state.recording || state.recording.status !== "recording") return;
-    try {
-      await api(`/api/screen/${encodeURIComponent(state.recording.id)}/interact`, {
-        method: "POST",
-        body: JSON.stringify(body)
-      });
-    } catch (e) {
-      // A dropped frame or a page mid-navigation is normal; only surface real problems.
-      if (!/no longer live|not live/i.test(e.message)) toast(e.message, "error");
-    }
-  }
-
-  function wireScreenInput() {
-    const screen = $("record-screen");
-    if (!screen) return;
-
-    screen.addEventListener("click", async e => {
-      const point = screenPoint(e);
-      if (!point) return;
-      screen.focus();
-      await sendInteraction({ kind: "click", ...point, clickCount: e.detail === 2 ? 2 : 1 });
-    });
-
-    screen.addEventListener("wheel", async e => {
-      const point = screenPoint(e);
-      if (!point) return;
-      e.preventDefault();
-      await sendInteraction({ kind: "scroll", ...point, deltaY: e.deltaY });
-    }, { passive: false });
-
-    screen.addEventListener("keydown", async e => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const named = ["Enter", "Tab", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
-      if (named.includes(e.key)) {
-        e.preventDefault();
-        await sendInteraction({ kind: "key", key: e.key });
-        return;
-      }
-      if (e.key.length === 1) {
-        e.preventDefault();
-        await sendInteraction({ kind: "type", text: e.key });
-      }
-    });
+    clearTimeout(state.recordFrameTimer);
   }
 
   function stopRecordStream() {
+    clearTimeout(state.recordFrameTimer);
     if (state.recordSource) {
       state.recordSource.close();
       state.recordSource = null;
     }
-    stopScreen();
   }
 
   async function startRecording(url) {
+    if (state.recordStarting) return;
+    state.recordStarting = true;
+    const button = $("record-start-form").querySelector("button");
+    button.disabled = true; button.textContent = "Opening browser…";
     const err = $("record-error");
     err.hidden = true;
     try {
       const session = await api("/api/record/start", {
         method: "POST",
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url, embedded: true })
       });
       state.recording = session;
       $("record-setup").hidden = true;
       $("record-live").hidden = false;
-      $("record-screen-url").textContent = session.url;
       renderRecordedSteps();
       streamRecording(session.id);
-      startScreen(session.id);
+      void refreshRecordingScreen(session.id);
     } catch (e) {
       err.textContent = e.message;
       err.hidden = false;
+    } finally {
+      state.recordStarting = false; button.disabled = false; button.textContent = "Start recording";
     }
   }
 
@@ -2228,11 +2111,23 @@
       state.recording = JSON.parse(e.data);
       renderRecordedSteps();
     });
+    source.addEventListener("frame", e => {
+      if (state.recording?.id !== id || state.recording.status !== "recording") return;
+      const frame = JSON.parse(e.data);
+      if (frame.width > 0 && frame.height > 0) displayRecordingFrame(frame);
+    });
     source.addEventListener("step", e => {
       if (!state.recording) return;
       const step = JSON.parse(e.data);
       // The server collapses repeated fills on one field; mirror that here.
       const steps = state.recording.steps;
+      if (step.action === "double-click") {
+        for (let i = 0; i < 2; i++) {
+          const prior = steps[steps.length - 1];
+          if (prior?.action !== "click" || prior.selector !== step.selector || Date.parse(step.at) - Date.parse(prior.at) > 1500) break;
+          steps.pop();
+        }
+      }
       const last = steps[steps.length - 1];
       if (last && step.action === "fill" && last.action === "fill" && last.selector === step.selector) {
         steps[steps.length - 1] = step;
@@ -2256,14 +2151,17 @@
     if (!session) return;
 
     const recording = session.status === "recording";
+    $("record-screen").classList.toggle("stopped", !recording);
+    if (session.error) { $("record-error").textContent = session.error; $("record-error").hidden = false; }
     $("record-badge").textContent = recording ? "recording" : "stopped";
     $("record-badge").className = `badge ${recording ? "running" : "passed"}`;
     $("btn-record-stop").hidden = !recording;
+    $("btn-record-capture").hidden = !recording;
     $("record-count").textContent = `${session.steps.length} step${session.steps.length === 1 ? "" : "s"}`;
     $("btn-record-apply").disabled = !session.steps.length;
 
     if (!session.steps.length) {
-      list.append(el("li", { class: "muted", text: "Interact with the browser window and steps will appear here." }));
+      list.append(el("li", { class: "muted", text: "Interact with the screen above and steps will appear here." }));
       return;
     }
 
@@ -2281,7 +2179,7 @@
             step.value ? el("div", { class: "record-step-detail", text: `value: ${step.value}` }) : null
           ),
           el("button", {
-            class: "btn-icon", title: "Drop this step",
+            class: "btn-icon", title: "Drop this step", disabled: recording,
             onclick: () => { session.steps.splice(i, 1); renderRecordedSteps(); }
           }, "✕")
         )
@@ -2292,6 +2190,12 @@
   async function stopRecording() {
     if (!state.recording) return;
     try {
+      await state.flushRecordInput?.();
+      try {
+        const frame = await api(`/api/record/${encodeURIComponent(state.recording.id)}/screen`);
+        $("record-screen-img").src = `data:image/jpeg;base64,${frame.image}`;
+        $("record-address").textContent = frame.url;
+      } catch { /* Keep the latest frame if navigation is still underway. */ }
       const session = await api(`/api/record/${encodeURIComponent(state.recording.id)}/stop`, { method: "POST" });
       state.recording = session;
       stopRecordStream();
@@ -2304,21 +2208,20 @@
   async function applyRecording() {
     if (!state.recording || !state.file) return;
     try {
-      const res = await api(`/api/record/${encodeURIComponent(state.recording.id)}/apply`, {
-        method: "POST",
-        body: JSON.stringify({
-          file: state.file,
-          mode: $("record-replace").checked ? "replace" : "append",
-          steps: state.recording.steps
-        })
-      });
-      state.test = res.test;
-      setDirty(false);
+      if (state.recording.status === "recording") await stopRecording();
+      if (state.recording.status !== "stopped") return;
+      let steps = state.recording.steps.map(({ at, fragile, ...step }) => step);
+      if ($("record-skip-navigation").checked && steps[0]?.action === "navigate") steps = steps.slice(1);
+      if (!steps.length) { toast("No steps selected. Include the opening navigation or record another interaction.", "error"); return; }
+      const position = Number($("record-insert").value);
+      if ($("record-replace").checked) state.test.steps = steps;
+      else state.test.steps.splice(position, 0, ...steps);
+      state.expandedStep = $("record-replace").checked ? 0 : position;
+      setDirty(true);
       renderSteps();
-      renderTestMeta();
-      await loadTests();
-      closeRecordModal();
-      toast(`Added ${res.added} recorded steps`, "ok");
+      state.recording = null;
+      await closeRecordModal();
+      toast(`Added ${steps.length} steps to your draft. Review and save to run.`, "ok");
     } catch (e) {
       toast(e.message, "error");
     }
@@ -2326,6 +2229,8 @@
 
   function wireRecorder() {
     $("btn-record").addEventListener("click", openRecordModal);
+    $("btn-record-screen").addEventListener("click", openRecordModal);
+    wireEmbeddedScreen();
     $("btn-close-record").addEventListener("click", closeRecordModal);
     $("btn-record-cancel").addEventListener("click", closeRecordModal);
     $("record-modal").addEventListener("click", e => {
@@ -2337,7 +2242,6 @@
     });
     $("btn-record-stop").addEventListener("click", stopRecording);
     $("btn-record-apply").addEventListener("click", applyRecording);
-    wireScreenInput();
 
     $("btn-export").addEventListener("click", exportTest);
     $("btn-import").addEventListener("click", () => $("import-file").click());
@@ -2346,6 +2250,78 @@
       e.target.value = "";
       await importTestFiles(files);
     });
+  }
+
+  function displayRecordingFrame(frame) {
+    $("record-screen-img").src = `data:image/jpeg;base64,${frame.image || frame.data}`;
+    $("record-screen-loading").hidden = true;
+    $("record-address").textContent = frame.url;
+    state.recordViewport = frame;
+  }
+
+  async function refreshRecordingScreen(id) {
+    if (state.recording?.id !== id || state.recording.status !== "recording") return;
+    try {
+      const frame = await api(`/api/record/${encodeURIComponent(id)}/screen`);
+      if (state.recording?.id !== id || state.recording.status !== "recording") return;
+      displayRecordingFrame(frame);
+    } catch (e) {
+      if (state.recording?.status === "recording") $("record-screen-loading").textContent = "Waiting for the browser screen…";
+    } finally {
+      if (state.recording?.id === id && state.recording.status === "recording") state.recordFrameTimer = setTimeout(() => refreshRecordingScreen(id), 2500);
+    }
+  }
+
+  function wireEmbeddedScreen() {
+    const screen = $("record-screen");
+    let queue = Promise.resolve();
+    const send = input => {
+      const id = state.recording?.id;
+      if (!id || state.recording.status !== "recording") return;
+      queue = queue.then(() => api(`/api/record/${encodeURIComponent(id)}/input`, { method: "POST", body: JSON.stringify(input) })).catch(e => { toast(e.message, "error"); });
+    };
+    const point = event => {
+      if (!state.recordViewport) return null;
+      const rect = $("record-screen-img").getBoundingClientRect();
+      if (!rect.width || event.clientY < rect.top || event.clientY > rect.bottom || event.clientX < rect.left || event.clientX > rect.right) return null;
+      return { x: Math.max(0, Math.min(1279, (event.clientX - rect.left) / rect.width * state.recordViewport.width)), y: Math.max(0, Math.min(799, (event.clientY - rect.top) / rect.height * state.recordViewport.height)) };
+    };
+    screen.addEventListener("click", event => {
+      const location = point(event); if (!location) return;
+      screen.focus({ preventScroll: true });
+      send({ type: "click", ...location, clickCount: event.detail > 1 ? 2 : 1 });
+    });
+    screen.addEventListener("contextmenu", event => {
+      const location = point(event); if (!location || state.recording?.status !== "recording") return;
+      event.preventDefault(); screen.focus({ preventScroll: true }); send({ type: "click", ...location, button: "right" });
+    });
+    let movedAt = 0;
+    screen.addEventListener("mousemove", event => {
+      if (Date.now() - movedAt < 150) return;
+      const location = point(event); if (!location) return;
+      movedAt = Date.now(); send({ type: "move", ...location });
+    });
+    screen.addEventListener("wheel", event => { if (state.recording?.status !== "recording") return; const location = point(event); if (!location) return; event.preventDefault(); send({ type: "wheel", ...location, deltaY: Math.max(-2000, Math.min(2000, event.deltaY)) }); }, { passive: false });
+    screen.addEventListener("keydown", event => {
+      if (state.recording?.status !== "recording" || event.isComposing) return;
+      event.stopPropagation(); event.preventDefault();
+      if (event.key === "Escape") { send({ type: "key", key: "Escape" }); $("btn-record-stop").focus(); return; }
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) { send({ type: "text", text: event.key }); return; }
+      if (/^(Enter|Tab|Backspace|Delete|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Home|End|PageUp|PageDown|[a-zA-Z0-9])$/.test(event.key)) {
+        const modifiers = [event.ctrlKey && "Control", event.metaKey && "Meta", event.altKey && "Alt", event.shiftKey && "Shift"].filter(Boolean);
+        send({ type: "key", key: [...modifiers, event.key].join("+") });
+      }
+    });
+    screen.addEventListener("paste", event => { event.preventDefault(); const text = event.clipboardData?.getData("text/plain"); if (text) send({ type: "text", text: text.slice(0, 4000) }); });
+    screen.addEventListener("compositionend", event => { if (event.data) send({ type: "text", text: event.data.slice(0, 4000) }); });
+    state.flushRecordInput = () => queue;
+    $("btn-record-capture").addEventListener("click", () => send({ type: "screenshot" }));
+  }
+
+  function chooseStepMethod() {
+    const body = el("div", {}, el("p", { class: "muted", text: "Record an interaction from your application screen, or add an action manually." }));
+    const form = formDialog("Add a step", body, "Add manually", () => { addStep(); });
+    body.append(el("button", { type: "button", class: "btn btn-primary btn-block", text: "Record from screen", onclick: () => { form.close(); openRecordModal(); } }));
   }
 
   // ---------------------------------------------------------
@@ -2646,97 +2622,8 @@
     });
   }
 
-  // ---------------------------------------------------------
-  // Navigation drawer
-  // ---------------------------------------------------------
-
-  const NAV_KEY = "mmqa.navCollapsed";
-
-  function setNavCollapsed(collapsed) {
-    document.querySelector(".app").classList.toggle("nav-collapsed", collapsed);
-    const button = $("btn-toggle-nav");
-    if (button) {
-      button.setAttribute("aria-expanded", String(!collapsed));
-      button.setAttribute("aria-label", collapsed ? "Show navigation" : "Hide navigation");
-      button.title = collapsed ? "Show navigation (\\)" : "Hide navigation (\\)";
-    }
-    try { localStorage.setItem(NAV_KEY, collapsed ? "1" : "0"); } catch { /* private mode */ }
-  }
-
-  function wireNavDrawer() {
-    let collapsed = false;
-    try { collapsed = localStorage.getItem(NAV_KEY) === "1"; } catch { /* private mode */ }
-    setNavCollapsed(collapsed);
-
-    const toggle = $("btn-toggle-nav");
-    if (toggle) {
-      toggle.addEventListener("click", () => {
-        setNavCollapsed(!document.querySelector(".app").classList.contains("nav-collapsed"));
-      });
-    }
-
-    document.addEventListener("keydown", e => {
-      if (e.key !== "\\" || e.ctrlKey || e.metaKey || e.altKey) return;
-      const tag = (e.target.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
-      e.preventDefault();
-      setNavCollapsed(!document.querySelector(".app").classList.contains("nav-collapsed"));
-    });
-  }
-
-  // ---------------------------------------------------------
-  // Projects and environments
-  //
-  // A project is a top-level folder. Its subfolders are environments -
-  // the same tests run against sandbox, staging or production - so the
-  // tree is two levels by design rather than arbitrarily deep.
-  // ---------------------------------------------------------
-
-  const DEFAULT_ENVIRONMENTS = ["Sandbox", "Production"];
-
-  function projectNames() {
-    return [...new Set(state.folders.map(f => f.split("/")[0]))].sort();
-  }
-
-  async function createProject() {
-    const name = await promptDialog(
-      "Project name, e.g. Coro or Anomali. Environments are added inside it.",
-      { title: "New project", okLabel: "Create" }
-    );
-    if (!name || !name.trim()) return;
-    const project = name.trim();
-    try {
-      await api("/api/folders", { method: "POST", body: JSON.stringify({ path: project }) });
-      // A project without an environment has nowhere to put a test, so give
-      // it the usual two up front; either can be removed.
-      for (const environment of DEFAULT_ENVIRONMENTS) {
-        await api("/api/folders", { method: "POST", body: JSON.stringify({ path: `${project}/${environment}` }) })
-          .catch(() => {});
-      }
-      await loadFolders();
-      toast(`Created project ${project} with ${DEFAULT_ENVIRONMENTS.join(" and ")}`, "ok");
-    } catch (e) {
-      toast(e.message, "error");
-    }
-  }
-
-  async function createEnvironment(project) {
-    const name = await promptDialog(
-      `Environment name inside ${project}, e.g. Sandbox, Staging or Production.`,
-      { title: "New environment", okLabel: "Create" }
-    );
-    if (!name || !name.trim()) return;
-    try {
-      await api("/api/folders", { method: "POST", body: JSON.stringify({ path: `${project}/${name.trim()}` }) });
-      await loadFolders();
-      toast(`Added ${name.trim()} to ${project}`, "ok");
-    } catch (e) {
-      toast(e.message, "error");
-    }
-  }
-
   function wireFolderControls() {
-    $("btn-new-folder").addEventListener("click", createProject);
+    $("btn-new-folder").addEventListener("click", () => environmentForm());
   }
 
   function wireSuiteControls() {
@@ -2917,7 +2804,15 @@
     }
 
     $("btn-new").addEventListener("click", () => createTest());
-    $("btn-mobile-browse").addEventListener("click", () => mobileNavigation($("btn-mobile-browse").getAttribute("aria-expanded") !== "true"));
+    try { document.querySelector(".app").classList.toggle("drawer-collapsed", localStorage.getItem("mmqa.navCollapsed") === "1"); } catch { /* Storage may be unavailable. */ }
+    const toggleNavigation = () => {
+      if (!window.matchMedia("(max-width: 760px)").matches) {
+        const collapsed = document.querySelector(".app").classList.toggle("drawer-collapsed");
+        try { localStorage.setItem("mmqa.navCollapsed", collapsed ? "1" : "0"); } catch { /* Keep the current page usable. */ }
+      }
+      mobileNavigation($("btn-mobile-browse").getAttribute("aria-expanded") !== "true");
+    };
+    $("btn-mobile-browse").addEventListener("click", toggleNavigation);
     $("nav-backdrop").addEventListener("click", () => { mobileNavigation(false); $("btn-mobile-browse").focus(); });
     window.matchMedia("(max-width: 760px)").addEventListener("change", () => mobileNavigation(false));
     $("btn-overview-new").addEventListener("click", () => createTest());
@@ -2937,7 +2832,8 @@
     $("btn-run").addEventListener("click", runTest);
     $("btn-stop").addEventListener("click", stopRun);
     $("btn-delete").addEventListener("click", deleteTest);
-    $("btn-add-step").addEventListener("click", addStep);
+    $("btn-add-step").addEventListener("click", chooseStepMethod);
+    $("btn-follow-run").addEventListener("click", () => { testPanel.follow = true; renderRun(testPanel); });
     $("btn-analyze").addEventListener("click", () => analyzeStep(testPanel, false));
     $("btn-reanalyze").addEventListener("click", () => analyzeStep(testPanel, true));
     $("test-name").addEventListener("input", () => setDirty(true));
@@ -2957,17 +2853,19 @@
       renderTestList();
     });
 
-    wireNavDrawer();
     wireFolderControls();
     wireShareModal();
     wireRecorder();
     wireSuiteControls();
 
     window.addEventListener("beforeunload", e => {
-      if (state.dirty || state.suiteDirty) { e.preventDefault(); e.returnValue = ""; }
+      if (state.dirty || state.suiteDirty || state.recording || state.recordStarting) { e.preventDefault(); e.returnValue = ""; }
     });
 
     document.addEventListener("keydown", e => {
+      if (e.key === "\\" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.closest("input,textarea,select,[contenteditable=true],[role=application]")) {
+        e.preventDefault(); toggleNavigation();
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         if (!$("workspace").hidden && state.file) saveTest();

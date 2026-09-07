@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="studio.css">
+  <link rel="stylesheet" href="projects.css">
 </head>
 <body>
 
@@ -154,58 +155,6 @@
   </div>
 </div>
 
-<div id="record-modal" class="modal-overlay" hidden>
-  <div class="modal record-modal">
-    <div class="modal-head">
-      <h2>Record steps</h2>
-      <button class="lightbox-close modal-close" id="btn-close-record" title="Close">✕</button>
-    </div>
-
-    <div class="record-body">
-      <div id="record-setup">
-        <p class="muted">A browser window opens at this URL. Everything you click, type, and select in it
-        becomes a step here. Close the window or press Stop when you are done.</p>
-        <form id="record-start-form" class="record-url-row">
-          <input id="record-url" placeholder="https://example.com/login" autocomplete="off" required>
-          <button class="btn btn-primary" type="submit">Open browser</button>
-        </form>
-        <div id="record-error" class="auth-error" hidden></div>
-      </div>
-
-      <div id="record-live" hidden>
-        <div class="record-workspace">
-          <div class="record-screen-wrap">
-            <div class="record-screen-bar">
-              <span class="screen-dot"></span>
-              <span id="record-screen-url" class="record-screen-url"></span>
-              <span id="record-screen-state" class="record-screen-state">connecting…</span>
-            </div>
-            <div id="record-screen" class="record-screen" tabindex="0"
-                 role="application" aria-label="Live browser. Click and type here to drive the page.">
-              <img id="record-screen-img" alt="Live view of the page being recorded">
-              <p id="record-screen-hint" class="record-screen-hint">Waiting for the first frame…</p>
-            </div>
-          </div>
-        <div class="record-status">
-          <span id="record-badge" class="badge running">recording</span>
-          <span id="record-count" class="muted">0 steps</span>
-          <button id="btn-record-stop" class="btn btn-danger btn-small">■ Stop</button>
-        </div>
-          <ol id="record-steps" class="record-steps"></ol>
-        </div>
-      </div>
-    </div>
-
-    <div class="confirm-actions">
-      <label class="record-mode">
-        <input type="checkbox" id="record-replace"> Replace existing steps
-      </label>
-      <button id="btn-record-cancel" class="btn">Close</button>
-      <button id="btn-record-apply" class="btn btn-primary" disabled>Add to test</button>
-    </div>
-  </div>
-</div>
-
 <div id="confirm-modal" class="modal-overlay" hidden>
   <div class="modal confirm-modal">
     <div class="modal-head"><h2 id="confirm-title"></h2></div>
@@ -241,7 +190,7 @@
 
   <main class="main" id="main-content" tabindex="-1">
     <header class="app-header">
-      <div class="breadcrumbs"><button id="btn-toggle-nav" class="btn-icon nav-toggle" aria-label="Hide navigation" aria-expanded="true" title="Hide navigation (\\)"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#menu"/></svg></button><button id="btn-mobile-browse" class="btn-icon mobile-browse" aria-label="Open navigation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#menu"/></svg></button><span class="breadcrumb-root">Workspace</span><span class="breadcrumb-divider">/</span><span id="page-label">Overview</span></div>
+      <div class="breadcrumbs"><button id="btn-mobile-browse" class="btn-icon mobile-browse" aria-label="Open navigation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#menu"/></svg></button><span class="breadcrumb-root">Workspace</span><span class="breadcrumb-divider">/</span><span id="page-label">Overview</span></div>
       <div class="header-actions">
         <button id="btn-notifications" class="bell" title="Notifications" aria-label="Notifications"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#bell"/></svg><span id="bell-count" class="bell-count" hidden>0</span></button>
         <details id="account-menu" class="dropdown account-menu">
@@ -262,8 +211,9 @@
     </div>
 
     <section id="tests-panel" class="library-workspace page-content" hidden aria-labelledby="library-title">
-      <div class="page-heading"><div><span class="eyebrow">BUILD &amp; ORGANIZE</span><h1 id="library-title">Projects <span id="library-count" class="heading-count"></span></h1><p>Every test lives in a project, and each project has environments to run it against.</p></div><div class="page-actions"><button id="btn-new" class="btn btn-primary">+ New test</button><button id="btn-new-folder" class="btn">+ New project</button><button id="btn-import" class="btn">Import JSON…</button><input id="import-file" type="file" accept="application/json,.json" multiple hidden></div></div>
-      <div class="library-tools"><div class="library-search"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#search"/></svg><input id="test-search" type="search" placeholder="Search tests or folders…" aria-label="Search tests" autocomplete="off"></div><div id="status-filter" class="status-filter"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="passed">Passed</button><button class="chip" data-filter="failed">Failed</button><button class="chip" data-filter="running">Running</button><button class="chip" data-filter="none">Not run</button></div></div>
+      <div class="page-heading"><div><span class="eyebrow">BUILD &amp; ORGANIZE</span><h1 id="library-title">Projects <span id="library-count" class="heading-count"></span></h1><p>One project. Clear environments. Every test in its place.</p></div><div class="page-actions"><button id="btn-new" class="btn btn-primary">+ New test</button><button id="btn-new-folder" class="btn">+ New project</button><button id="btn-import" class="btn">Import JSON…</button><input id="import-file" type="file" accept="application/json,.json" multiple hidden></div></div>
+      <div id="project-grid" class="project-grid" aria-label="Projects"></div><div id="project-context" class="project-context"></div><div id="environment-list" class="environment-list"></div>
+      <div class="library-tools"><div class="library-search"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#search"/></svg><input id="test-search" type="search" placeholder="Search tests or projects…" aria-label="Search tests" autocomplete="off"></div><div id="status-filter" class="status-filter"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="passed">Passed</button><button class="chip" data-filter="failed">Failed</button><button class="chip" data-filter="running">Running</button><button class="chip" data-filter="none">Not run</button></div></div>
       <div class="library-surface surface"><div class="library-columns"><span>TEST CASE</span><span>STEPS</span><span>LAST RUN</span><span>STATUS</span></div><ul id="test-tree" class="test-list"></ul></div>
       <p id="library-summary" class="library-summary" aria-live="polite"></p>
     </section>
@@ -307,18 +257,33 @@
         </section>
 
         <section class="pane pane-run">
+<section id="record-modal" class="embedded-recorder" hidden aria-label="Screen recorder">
+  <div class="pane-head"><h2>Record your screen</h2><button id="btn-close-record" class="btn btn-small">Back to playback</button></div>
+  <div id="record-setup"><p class="muted">Open your application here. Click the screen and type to record interactions as test steps.</p>
+    <form id="record-start-form" class="record-url-row"><input id="record-url" aria-label="Recording URL" type="url" placeholder="https://your-app.example/" required><button class="btn btn-primary" type="submit">Start recording</button></form>
+  </div>
+  <div id="record-error" class="auth-error" role="alert" hidden></div>
+  <div id="record-live" hidden>
+    <div class="record-status"><span id="record-badge" class="badge running">recording</span><span id="record-count">0 steps</span><button id="btn-record-capture" class="btn btn-small">Capture screenshot step</button><button id="btn-record-stop" class="btn btn-danger btn-small">■ Stop recording</button></div>
+    <div class="browser-address"><span class="environment-dot"></span><span id="record-address">Opening application…</span></div>
+    <div id="record-screen" class="record-screen" tabindex="0" role="application" aria-label="Recorded browser. Click to focus, type, scroll, and use keyboard shortcuts. Escape returns to controls."><img id="record-screen-img" alt="Live recorded browser" draggable="false"><span id="record-screen-loading">Connecting to browser…</span></div>
+    <p class="muted screen-help">Click a field on the screen, then type. Use Tab to move, arrows for select menus, and Enter to activate. Press Escape to return to these controls.</p>
+    <details class="record-outline" open><summary>Captured steps · review before adding</summary><ol id="record-steps" class="record-steps"></ol></details>
+  </div>
+  <div class="record-apply"><label>Insert steps<select id="record-insert" aria-label="Insert recorded steps"></select></label><label class="checkbox-row"><input type="checkbox" id="record-replace"> Replace all steps</label><label class="checkbox-row"><input type="checkbox" id="record-skip-navigation"> Skip opening navigation</label><button id="btn-record-cancel" class="btn">Discard recording</button><button id="btn-record-apply" class="btn btn-primary" disabled>Add to draft</button></div>
+</section>
           <div class="pane-head">
-            <h2>Run</h2>
+            <h2>Browser &amp; playback</h2><button id="btn-record-screen" class="btn btn-small">Record screen</button>
             <div id="run-status" class="run-status"></div>
           </div>
 
-          <div id="run-empty" class="muted">No run yet. Press Run to execute this test and watch every step here.</div>
+          <div id="run-empty" class="muted">Your application screen appears here. Record a journey, or press Run to watch the saved steps execute.</div>
 
           <div id="run-body" hidden>
             <div class="run-split">
               <ol id="run-steps" class="run-steps"></ol>
               <div class="viewer">
-                <div id="viewer-title" class="viewer-title"></div>
+                <div class="playback-controls"><div id="viewer-title" class="viewer-title"></div><button id="btn-follow-run" class="btn-link">Follow live</button></div><div id="playback-address" class="browser-address" hidden></div>
                 <div id="viewer-empty" class="muted">Select a step to see its screenshot.</div>
                 <img id="viewer-img" alt="Step screenshot" hidden>
                 <div id="viewer-error" class="error" hidden>

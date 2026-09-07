@@ -1,0 +1,134 @@
+/* Projects and the screen-first test editor. */
+.mobile-browse { display: inline-grid; place-items: center; min-width: 32px; height: 32px; padding: 0; color: #62758f; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; margin-bottom: 30px; }
+.project-card { border: 1px solid #dce4ef; background: white; border-radius: 12px; padding: 20px; text-align: left; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: #1e2b40; cursor: pointer; min-width: 0; transition: border-color .15s, box-shadow .15s; }
+.project-card:hover { border-color: #718baa; box-shadow: 0 4px 14px #15294208; }
+.project-card.selected { border-color: #ef6b2a; box-shadow: 0 0 0 1px #ef6b2a; background: #fffaf7; }
+.project-card strong { font-size: 17px; overflow-wrap: anywhere; }
+.project-card .muted { font-size: 12px; }
+.project-card-icon { background: #edf2fb; color: #476693; width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; font-size: 12px; font-weight: 700; margin-bottom: 5px; }
+.project-attention { font-size: 12px; color: #ac402c; }
+.project-ready { font-size: 12px; color: #65758c; }
+.project-context { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 16px; }
+.project-context h2 { font-size: 21px; margin: 7px 0; }
+.environment-list { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 15px; margin-bottom: 10px; }
+.environment-card { min-width: 160px; max-width: 350px; flex-shrink: 0; border: 1px solid #dce4ef; border-radius: 8px; padding: 12px 16px; background: white; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; color: #334765; font-family: inherit; }
+.environment-card.selected { border-color: #567bac; background: #f0f5fc; }
+.environment-select { border: 0; background: transparent; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; width: 100%; }
+.environment-card > span, .environment-url { font-size: 11px; color: #65758c; }
+.environment-url { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.environment-type { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; border-radius: 4px; padding: 3px 5px; background: #e3edfd; color: #345c94; }
+.environment-type.production { background: #fff0e7; color: #ad5421; }
+.environment-card .btn-link { font-size: 11px; }
+.project-dialog { border: 1px solid #dde5ee; border-radius: 14px; padding: 0; width: min(660px, calc(100vw - 32px)); max-height: 88dvh; color: #24334b; box-shadow: 0 24px 100px #0d1e3d33; }
+.project-dialog::backdrop { background: #101c3266; }
+.project-form { padding: 26px; overflow: auto; }
+.project-form h2 { margin: 0 0 18px; font-size: 22px; }
+.project-form label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; margin: 16px 0; }
+.project-form input:not([type=checkbox]), .project-form select, .record-apply select { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid #d8e1ed; border-radius: 7px; background: white; color: #273954; padding: 11px 12px; font: inherit; }
+.project-form .muted { font-size: 12px; line-height: 1.7; }
+.project-form .checkbox-row, .checkbox-row { display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 12px; }
+.move-preview h3 { font-size: 14px; margin-top: 20px; }
+.move-preview ul { padding-left: 20px; font-size: 13px; line-height: 1.8; }
+.move-change { border: 1px solid #dde5ee; border-radius: 7px; margin-top: 8px; padding: 10px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; overflow-wrap: anywhere; }
+.move-change del { color: #9b4d42; }
+.move-change ins { color: #287253; text-decoration: none; }
+.ai-adaptation { white-space: pre-wrap; font-size: 13px; line-height: 1.8; background: #f3f6fc; border-radius: 8px; padding: 14px; }
+#workspace .panes { grid-template-columns: minmax(290px, 340px) minmax(0, 1fr); gap: 16px; padding: 12px 22px 26px; align-items: start; }
+#workspace .pane-steps { padding: 14px 12px; min-width: 0; min-height: 0; max-height: calc(100dvh - 236px); overflow-y: auto; }
+#workspace .pane-run { min-width: 0; padding: 16px; }
+#workspace .pane-run > .pane-head { flex-wrap: wrap; }
+#workspace .pane-run > .pane-head h2 { flex: 1; }
+#workspace .pane-run > .pane-head .run-status { flex-basis: 100%; }
+#workspace .step-card { border: 1px solid #dce5f0; box-shadow: none; border-radius: 7px; margin: 0 0 9px; overflow: hidden; }
+#workspace .step-head { display: flex; flex-wrap: wrap; gap: 5px; padding: 9px 8px; }
+#workspace .step-head select { flex: 1 1 145px; width: 145px; min-width: 0; font-size: 12px; padding: 5px; }
+#workspace .step-head .step-index { font-size: 11px; width: 22px; }
+#workspace .step-head .step-desc { display: none; }
+#workspace .step-tools { margin-left: auto; gap: 2px; }
+#workspace .step-tools .btn-icon { width: 22px; height: 24px; font-size: 12px; }
+#workspace .step-expand { width: 20px; height: 24px; }
+#workspace .step-body { grid-template-columns: minmax(0, 1fr); padding: 10px; gap: 10px; }
+#workspace .step-body .span-2 { grid-column: auto; }
+#workspace .step-body input, #workspace .step-body select { font-size: 12px; min-width: 0; }
+#workspace .step-collapsed .step-body, #workspace .step-collapsed .record-after { display: none; }
+#workspace .step-collapsed .step-tools { display: none; }
+#workspace .step-collapsed .step-expand { transform: rotate(-90deg); }
+#workspace .record-after { font-size: 11px; padding: 0 10px 10px; }
+#workspace .step-card.run-current { border-color: #ec702e; box-shadow: 0 0 0 1px #ec702e; }
+#workspace .run-split { display: flex; flex-direction: column; gap: 10px; }
+#workspace .run-steps { display: flex; flex-direction: row; gap: 5px; overflow-x: auto; max-height: none; padding: 0 0 8px; border: 0; }
+#workspace .run-step { flex: 0 0 auto; width: auto; padding: 7px 9px; border: 1px solid #e1e7ef; border-radius: 5px; font-size: 11px; }
+#workspace .run-step .label small, #workspace .run-step .time { display: none; }
+#workspace .viewer { border: 1px solid #dce4ef; border-radius: 8px; background: #f7f9fc; padding: 0; overflow: hidden; }
+#workspace .viewer img { display: block; width: 100%; max-height: none; object-fit: contain; border: 0; border-radius: 0; }
+.playback-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: white; padding: 10px 12px; min-height: 40px; }
+.playback-controls .viewer-title { padding: 0; margin: 0; font-size: 11px; }
+.playback-controls .btn-link { font-size: 11px; white-space: nowrap; }
+#viewer-empty { min-height: 140px; display: grid; place-items: center; padding: 24px; }
+#viewer-error { margin: 12px; }
+#run-empty { min-height: 200px; border: 1px dashed #d4deed; border-radius: 8px; padding: 40px; display: grid; place-items: center; text-align: center; line-height: 1.8; background: #f9fbfe; }
+.browser-address { display: flex; align-items: center; gap: 9px; background: #eef2f8; color: #61738f; font-size: 11px; padding: 10px 12px; overflow-wrap: anywhere; }
+.embedded-recorder { min-width: 0; }
+#workspace.is-recording .pane-run > :not(.embedded-recorder) { display: none !important; }
+.embedded-recorder .record-url-row { display: flex; gap: 8px; margin: 16px 0; }
+.embedded-recorder .record-url-row input { flex: 1; min-width: 0; border: 1px solid #d8e1ed; border-radius: 6px; padding: 10px; font: inherit; font-size: 12px; }
+.record-screen { position: relative; width: 100%; background: #e7edf6; min-height: 180px; border: 1px solid #dce4ef; border-radius: 0 0 7px 7px; overflow: hidden; cursor: crosshair; }
+.record-screen:focus { outline: 3px solid #438be7; outline-offset: 2px; }
+.record-screen.stopped { cursor: default; }
+.record-screen img { display: block; width: 100%; height: auto; max-width: calc((100dvh - 390px) * 1.6); margin: 0 auto; min-height: 180px; user-select: none; }
+#record-screen-loading { position: absolute; inset: 0; display: grid; place-items: center; background: #eef2f8; color: #61738f; font-size: 13px; }
+.screen-help { font-size: 11px; line-height: 1.6; margin: 10px 0; }
+.record-outline { padding: 12px 0; font-size: 12px; }
+.record-outline summary { cursor: pointer; color: #506b93; }
+.record-outline .record-steps { max-height: 210px; overflow-y: auto; }
+.record-apply { border-top: 1px solid #dce4ef; padding-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.record-apply > label:first-child { display: flex; align-items: center; gap: 8px; font-size: 12px; width: 100%; }
+.record-apply select { width: auto; padding: 8px; font-size: 12px; }
+.record-apply .btn { font-size: 12px; }
+.record-status { flex-wrap: wrap; }
+[hidden] { display: none !important; }
+@media (min-width: 761px) {
+  .app.drawer-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+  .app.drawer-collapsed > .sidebar { visibility: hidden; overflow: hidden; padding: 0; }
+}
+@media (max-width: 1100px) and (min-width: 761px) {
+  #workspace .panes { grid-template-columns: minmax(250px, 290px) minmax(0, 1fr); padding: 12px; gap: 12px; }
+  #workspace .pane-run { padding: 12px; }
+  #workspace .pane-steps { padding: 10px 8px; }
+}
+@media (max-width: 760px) {
+  .project-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .project-card { padding: 14px; gap: 8px; }
+  .project-card strong { font-size: 14px; }
+  .project-card .muted, .project-ready, .project-attention { font-size: 10px; }
+  .project-context { flex-wrap: wrap; }
+  #workspace .panes { display: flex; flex-direction: column; padding: 12px; gap: 14px; }
+  #workspace .pane-run { order: -1; width: 100%; padding: 12px; min-height: 0; }
+  #workspace .pane-steps { width: 100%; max-height: none; }
+  #run-empty, #viewer-empty { min-height: 200px; padding: 24px; }
+  .project-form { padding: 20px; }
+  .embedded-recorder .record-url-row { flex-wrap: wrap; }
+  .embedded-recorder .record-url-row input { flex-basis: 100%; }
+  .record-screen, .record-screen img { min-height: 120px; }
+  .record-screen img { max-width: 100%; }
+}
+
+/* The screenshot is what the run panel is for: give it the slack that the
+   oversized floors used to waste, and let it scroll rather than overflow. */
+#workspace .pane-run .viewer,
+#suite-workspace .pane-run .viewer { min-height: 0; overflow: auto; }
+#workspace .pane-run .run-split,
+#suite-workspace .pane-run .run-split { flex: 1; min-height: 0; }
+#viewer-img { max-height: none; }
+
+/* An implicit grid row sizes to its tallest item, which let the run panel
+   define the height instead of the window. Pin the row to the container so the
+   panels clip and scroll inside it. */
+#workspace .panes,
+#suite-workspace .panes { grid-template-rows: minmax(0, 1fr); }
+
+/* align-items:start let each panel size to its own content, so the run panel
+   grew past the row and out of the window. Stretch them to the row instead. */
+#workspace .panes,
+#suite-workspace .panes { align-items: stretch; }
