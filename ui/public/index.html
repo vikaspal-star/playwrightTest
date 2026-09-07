@@ -173,12 +173,26 @@
       </div>
 
       <div id="record-live" hidden>
+        <div class="record-workspace">
+          <div class="record-screen-wrap">
+            <div class="record-screen-bar">
+              <span class="screen-dot"></span>
+              <span id="record-screen-url" class="record-screen-url"></span>
+              <span id="record-screen-state" class="record-screen-state">connecting…</span>
+            </div>
+            <div id="record-screen" class="record-screen" tabindex="0"
+                 role="application" aria-label="Live browser. Click and type here to drive the page.">
+              <img id="record-screen-img" alt="Live view of the page being recorded">
+              <p id="record-screen-hint" class="record-screen-hint">Waiting for the first frame…</p>
+            </div>
+          </div>
         <div class="record-status">
           <span id="record-badge" class="badge running">recording</span>
           <span id="record-count" class="muted">0 steps</span>
           <button id="btn-record-stop" class="btn btn-danger btn-small">■ Stop</button>
         </div>
-        <ol id="record-steps" class="record-steps"></ol>
+          <ol id="record-steps" class="record-steps"></ol>
+        </div>
       </div>
     </div>
 
@@ -217,7 +231,7 @@
     <div class="nav-caption">WORKSPACE</div>
     <nav class="sidebar-tabs" aria-label="Workspace">
       <button id="btn-overview" class="tab active" data-tab="overview" aria-label="Workspace overview"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#overview"/></svg><span>Overview</span></button>
-      <button class="tab" data-tab="tests"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#tests"/></svg><span>Test library</span><span id="nav-test-count" class="nav-count">0</span></button>
+      <button class="tab" data-tab="tests"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#tests"/></svg><span>Projects</span><span id="nav-test-count" class="nav-count">0</span></button>
       <button class="tab" data-tab="suites"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#suites"/></svg><span>Suites</span><span id="nav-suite-count" class="nav-count">0</span></button>
       <button class="tab" data-tab="reports"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#reports"/></svg><span>Reports</span></button>
     </nav>
@@ -227,7 +241,7 @@
 
   <main class="main" id="main-content" tabindex="-1">
     <header class="app-header">
-      <div class="breadcrumbs"><button id="btn-mobile-browse" class="btn-icon mobile-browse" aria-label="Open navigation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#menu"/></svg></button><span class="breadcrumb-root">Workspace</span><span class="breadcrumb-divider">/</span><span id="page-label">Overview</span></div>
+      <div class="breadcrumbs"><button id="btn-toggle-nav" class="btn-icon nav-toggle" aria-label="Hide navigation" aria-expanded="true" title="Hide navigation (\\)"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#menu"/></svg></button><button id="btn-mobile-browse" class="btn-icon mobile-browse" aria-label="Open navigation" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#menu"/></svg></button><span class="breadcrumb-root">Workspace</span><span class="breadcrumb-divider">/</span><span id="page-label">Overview</span></div>
       <div class="header-actions">
         <button id="btn-notifications" class="bell" title="Notifications" aria-label="Notifications"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#bell"/></svg><span id="bell-count" class="bell-count" hidden>0</span></button>
         <details id="account-menu" class="dropdown account-menu">
@@ -248,7 +262,7 @@
     </div>
 
     <section id="tests-panel" class="library-workspace page-content" hidden aria-labelledby="library-title">
-      <div class="page-heading"><div><span class="eyebrow">BUILD &amp; ORGANIZE</span><h1 id="library-title">Test library <span id="library-count" class="heading-count"></span></h1><p>A home for every test, organized by folder.</p></div><div class="page-actions"><button id="btn-new" class="btn btn-primary">+ New test</button><button id="btn-new-folder" class="btn">New folder</button><button id="btn-import" class="btn">Import JSON…</button><input id="import-file" type="file" accept="application/json,.json" multiple hidden></div></div>
+      <div class="page-heading"><div><span class="eyebrow">BUILD &amp; ORGANIZE</span><h1 id="library-title">Projects <span id="library-count" class="heading-count"></span></h1><p>Every test lives in a project, and each project has environments to run it against.</p></div><div class="page-actions"><button id="btn-new" class="btn btn-primary">+ New test</button><button id="btn-new-folder" class="btn">+ New project</button><button id="btn-import" class="btn">Import JSON…</button><input id="import-file" type="file" accept="application/json,.json" multiple hidden></div></div>
       <div class="library-tools"><div class="library-search"><svg class="icon" aria-hidden="true"><use href="brand/icons.svg#search"/></svg><input id="test-search" type="search" placeholder="Search tests or folders…" aria-label="Search tests" autocomplete="off"></div><div id="status-filter" class="status-filter"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="passed">Passed</button><button class="chip" data-filter="failed">Failed</button><button class="chip" data-filter="running">Running</button><button class="chip" data-filter="none">Not run</button></div></div>
       <div class="library-surface surface"><div class="library-columns"><span>TEST CASE</span><span>STEPS</span><span>LAST RUN</span><span>STATUS</span></div><ul id="test-tree" class="test-list"></ul></div>
       <p id="library-summary" class="library-summary" aria-live="polite"></p>
@@ -260,7 +274,7 @@
     </section>
 
     <div id="workspace" class="workspace" hidden>
-      <div class="editor-context"><button class="btn-link" data-back="tests">← Test library</button><span>TEST EDITOR</span></div>
+      <div class="editor-context"><button class="btn-link" data-back="tests">← Projects</button><span>TEST EDITOR</span></div>
       <header class="toolbar">
         <div class="toolbar-title">
           <input id="test-name" class="input-title" placeholder="Test name" autocomplete="off">

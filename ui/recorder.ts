@@ -12,6 +12,7 @@
 
 import crypto from "crypto";
 import { chromium, devices } from "playwright";
+import * as screencast from "./agent/screencast";
 
 export interface RecordedStep {
   action: string;
@@ -166,6 +167,9 @@ export function captureScript(): void {
       // Typing is captured on change; a click into a field is noise.
       const tag = target.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // Clicking empty page background is not a step. Without this every stray
+      // click on the layout records a useless "click html" that later fails.
+      if (tag === "HTML" || tag === "BODY") return;
       const { selector, fragile } = selectorFor(target);
       send({ action: "click", selector, fragile, note: `Click ${describe(target)}` });
     },
@@ -246,11 +250,17 @@ export function subscribe(id: string, onStep: (step: RecordedStep) => void, onEn
 }
 
 /** Launch a headed browser at `url` and start turning interactions into steps. */
-export async function start(url: string, startedBy: string): Promise<RecordingSession> {
+export async function start(
+  url: string,
+  startedBy: string,
+  options: { embedded?: boolean } = {}
+): Promise<RecordingSession> {
   const id = crypto.randomBytes(6).toString("hex");
-  // Headed by default - you drive the browser. RECORDER_HEADLESS=1 is for
-  // machines with no display (and for testing the pipeline itself).
-  const headless = process.env.RECORDER_HEADLESS === "1";
+  // Embedded is the default: the page is streamed into the studio panel and
+  // driven from there, so recording happens where you are already looking.
+  // Opening a real window stays available for anyone who prefers it.
+  const embedded = options.embedded !== false && process.env.RECORDER_HEADLESS !== "0";
+  const headless = embedded || process.env.RECORDER_HEADLESS === "1";
   const browser = await chromium.launch({
     headless,
     args: headless ? [] : ["--start-maximized"]
@@ -263,6 +273,7 @@ export async function start(url: string, startedBy: string): Promise<RecordingSe
     headless ? { ...profile } : { ...profileRest, viewport: null }
   );
   const page = await context.newPage();
+  if (embedded) await screencast.start(id, page).catch(() => {});
 
   const session: InternalSession = {
     id,
@@ -274,6 +285,7 @@ export async function start(url: string, startedBy: string): Promise<RecordingSe
     listeners: new Set(),
     onEnd: new Set(),
     close: async () => {
+      await screencast.stop(id).catch(() => {});
       await context.close().catch(() => {});
       await browser.close().catch(() => {});
     }

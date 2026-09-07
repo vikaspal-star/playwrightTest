@@ -51,6 +51,7 @@ import {
 import { RunLike, buildReport } from "./reports";
 import { importTest } from "./importers";
 import * as recorder from "./recorder";
+import * as screencast from "./agent/screencast";
 import { AnalysisResult, analyzeFailure, analyzeRun, isConfigured as aiConfigured } from "./anthropic";
 import { ROOT, WORKSPACE, JSON_DIR, SUITES_DIR, RUNS_DIR, DATA_DIR, HOST, PORT, MAX_ACTIVE_RUNS, RUN_TIMEOUT_MS } from "./config";
 import { readJson, writeJson, acquireWorkspaceLock } from "./storage";
@@ -1461,6 +1462,81 @@ app.post("/api/tests/import", (req, res) => {
     skipped: result.skipped,
     test: { ...readTest(file), meta, access: "edit" as Access }
   });
+});
+
+// ---- Live screen ----
+//
+// The browser the studio drives is streamed into the app so recording and
+// running are watched in place. Only the person who owns the session may
+// watch or drive it.
+
+function requireOwnedScreen(req: Request, id: string): void {
+  const user = requireAuth(req);
+  const session = recorder.get(id);
+  if (!session) throw new HttpError(404, "That screen is not available.");
+  if (session.startedBy !== user.username && !isAdminish(user)) {
+    throw new HttpError(403, "That screen belongs to someone else.");
+  }
+}
+
+app.get("/api/screen/:id/events", (req, res) => {
+  requireOwnedScreen(req, req.params.id);
+  if (!screencast.isActive(req.params.id)) throw new HttpError(404, "That screen is not live.");
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive"
+  });
+
+  // Frames arrive faster than a panel needs them; sending every one wastes
+  // bandwidth and can outrun the client, so coalesce to a steady rate.
+  let pending: screencast.Frame | undefined;
+  const flush = setInterval(() => {
+    if (!pending) return;
+    sse(res, "frame", pending);
+    pending = undefined;
+  }, 120);
+
+  const unsubscribe = screencast.subscribe(req.params.id, frame => { pending = frame; });
+  req.on("close", () => {
+    clearInterval(flush);
+    unsubscribe();
+  });
+});
+
+app.post("/api/screen/:id/interact", async (req, res) => {
+  requireOwnedScreen(req, req.params.id);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const kind = String(body.kind ?? "");
+  const number = (value: unknown): number => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  try {
+    if (kind === "click" || kind === "move") {
+      await screencast.interact(req.params.id, {
+        kind,
+        x: number(body.x),
+        y: number(body.y),
+        button: body.button === "right" ? "right" : "left",
+        clickCount: body.clickCount === 2 ? 2 : 1
+      } as screencast.PointerAction);
+    } else if (kind === "scroll") {
+      await screencast.interact(req.params.id, { kind, x: number(body.x), y: number(body.y), deltaY: number(body.deltaY) });
+    } else if (kind === "type") {
+      await screencast.interact(req.params.id, { kind, text: String(body.text ?? "").slice(0, 500) });
+    } else if (kind === "key") {
+      await screencast.interact(req.params.id, { kind, key: String(body.key ?? "").slice(0, 40) });
+    } else {
+      throw new HttpError(400, `Unsupported interaction: ${kind}`);
+    }
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(409, e instanceof Error ? e.message : String(e));
+  }
+  res.status(204).end();
 });
 
 // ---- Recorder ----

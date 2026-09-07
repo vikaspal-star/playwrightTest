@@ -26,6 +26,7 @@
     allUsers: [],
     recording: null,
     recordSource: null,
+    screenSource: null,
     featureCatalog: [],
     aiConfigured: false,
     report: null,
@@ -251,7 +252,7 @@
       if (active) btn.setAttribute("aria-current", "page"); else btn.removeAttribute("aria-current");
     }
     for (const id of ["empty", "tests-panel", "suites-panel", "workspace", "suite-workspace", "reports-workspace"]) $(id).hidden = id !== view;
-    $("page-label").textContent = { overview: "Overview", tests: "Test library", suites: "Suites", reports: "Reports" }[section];
+    $("page-label").textContent = { overview: "Overview", tests: "Projects", suites: "Suites", reports: "Reports" }[section];
     mobileNavigation(false);
   }
 
@@ -373,29 +374,87 @@
     ));
   }
 
-  function renderFolderNode(node, depth) {
-    const rows = [];
-    const sortedFolders = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
-    for (const folder of sortedFolders) {
-      const collapsed = state.collapsedFolders.has(folder.path);
-      rows.push(
-        el("li", { class: "folder-row", style: `--depth:${Math.min(depth, 4)}` },
-          el("button", { class: "folder-toggle", "data-folder": folder.path, "aria-expanded": String(!collapsed), "aria-label": `${collapsed ? "Expand" : "Collapse"} folder ${folder.path}`, onclick: () => toggleFolder(folder.path) },
-            el("span", { "aria-hidden": "true", text: collapsed ? "▸" : "▾" }), el("span", { class: "folder-name", text: folder.name }), el("span", { class: "folder-count", text: String(countTests(folder)) })),
-          el("div", { class: "folder-actions" },
-            can("tests.create") ? el("button", { class: "btn-icon", title: "New test in this folder", onclick: () => createTest(folder.path) }, "+") : null,
-            can("folders.manage") ? el("button", { class: "btn-icon", title: "New subfolder", onclick: () => createFolder(folder.path) }, "⊞") : null,
-            can("folders.manage") && countTests(folder) === 0 ? el("button", { class: "btn-icon", title: "Delete this empty folder", onclick: () => deleteFolder(folder.path) }, "✕") : null
-          )
-        )
-      );
-      if (!collapsed) rows.push(...renderFolderNode(folder, depth + 1));
-    }
-    const sortedTests = [...node.tests].sort((a, b) => (a.name || a.file).localeCompare(b.name || b.file));
-    for (const t of sortedTests) rows.push(testRow(t, depth));
-    return rows;
+  // The tree is two levels on purpose: a project, and the environments it runs
+  // against. Rendering every level identically and relying on indentation alone
+  // made it hard to tell a project from an environment from a test, so each
+  // level now looks like what it is.
+  const ENVIRONMENT_HINTS = [
+    { match: /prod/i, label: "production", tone: "prod" },
+    { match: /stag|uat|pre/i, label: "staging", tone: "stage" },
+    { match: /sand|dev|test|qa|local/i, label: "sandbox", tone: "sandbox" }
+  ];
+
+  function environmentTone(name) {
+    return ENVIRONMENT_HINTS.find(hint => hint.match.test(name)) || { label: "environment", tone: "neutral" };
   }
 
+  function folderActions(path, node, kind) {
+    const actions = [];
+    if (can("tests.create")) {
+      actions.push(el("button", { class: "btn-icon", title: `New test in ${path}`, "aria-label": `New test in ${path}`, onclick: () => createTest(path) }, "+"));
+    }
+    if (kind === "project" && can("folders.manage")) {
+      actions.push(el("button", { class: "btn-icon", title: `New environment in ${path}`, "aria-label": `New environment in ${path}`, onclick: () => createEnvironment(path) }, "⊞"));
+    }
+    if (can("folders.manage") && countTests(node) === 0) {
+      actions.push(el("button", { class: "btn-icon", title: `Delete empty ${kind} ${path}`, "aria-label": `Delete empty ${kind} ${path}`, onclick: () => deleteFolder(path) }, "✕"));
+    }
+    return el("div", { class: "folder-actions" }, actions);
+  }
+
+  function groupRow(node, kind) {
+    const collapsed = state.collapsedFolders.has(node.path);
+    const count = countTests(node);
+    const tone = kind === "environment" ? environmentTone(node.name) : null;
+
+    return el("li", { class: `tree-row tree-${kind}${collapsed ? " collapsed" : ""}` },
+      el("button", {
+        class: "tree-disclosure",
+        "data-folder": node.path,
+        "aria-expanded": String(!collapsed),
+        "aria-label": `${collapsed ? "Expand" : "Collapse"} ${kind} ${node.path}`,
+        onclick: () => toggleFolder(node.path)
+      },
+        el("span", { class: "tree-caret", "aria-hidden": "true", text: collapsed ? "▸" : "▾" }),
+        el("span", { class: `tree-icon tree-icon-${kind}`, "aria-hidden": "true", text: kind === "project" ? "◆" : "●" }),
+        el("span", { class: "tree-label", text: node.name }),
+        tone ? el("span", { class: `env-tag env-${tone.tone}`, text: tone.label }) : null,
+        el("span", { class: "tree-count", text: `${count}` })
+      ),
+      folderActions(node.path, node, kind)
+    );
+  }
+
+  function renderFolderNode(node, depth) {
+    const rows = [];
+    const kind = depth === 0 ? "project" : "environment";
+    const sortedFolders = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const folder of sortedFolders) {
+      rows.push(groupRow(folder, kind));
+      if (state.collapsedFolders.has(folder.path)) continue;
+
+      const children = renderFolderNode(folder, depth + 1);
+      if (children.length) {
+        rows.push(el("li", { class: `tree-children tree-children-${kind}` }, el("ul", { class: "tree-sublist" }, children)));
+      } else {
+        rows.push(el("li", { class: `tree-children tree-children-${kind}` },
+          el("p", { class: "tree-empty" },
+            kind === "project" ? "No environments yet. " : "No tests here yet. ",
+            can(kind === "project" ? "folders.manage" : "tests.create")
+              ? el("button", {
+                  class: "btn-link",
+                  onclick: () => (kind === "project" ? createEnvironment(folder.path) : createTest(folder.path))
+                }, kind === "project" ? "Add an environment" : "Add a test")
+              : null
+          )));
+      }
+    }
+
+    const sortedTests = [...node.tests].sort((a, b) => (a.name || a.file).localeCompare(b.name || b.file));
+    for (const t of sortedTests) rows.push(testRow(t, 0));
+    return rows;
+  }
   function toggleFolder(path) {
     if (state.collapsedFolders.has(path)) state.collapsedFolders.delete(path);
     else state.collapsedFolders.add(path);
@@ -535,12 +594,24 @@
     await loadHistory(testPanel, { autoOpenLatest: true });
   }
 
+  // Offer a name that is actually free. Suggesting "new-test.json" when one
+  // already exists made every second test start with an error.
+  function freeTestName(base) {
+    const taken = new Set(state.tests.map(t => t.file.toLowerCase()));
+    if (!taken.has(`${base}.json`)) return `${base}.json`;
+    for (let n = 2; n < 500; n++) {
+      const candidate = `${base}-${n}.json`;
+      if (!taken.has(candidate)) return candidate;
+    }
+    return `${base}-${Date.now()}.json`;
+  }
+
   async function createTest(folder) {
     if (state.dirty && !(await confirmDialog("Discard unsaved test changes before creating another test?", { okLabel: "Discard", danger: true }))) return;
-    const raw = await promptDialog("File name for the new test (saved in ./json):", {
+    const raw = await promptDialog(folder ? `Name for the new test in ${folder}:` : "Name for the new test:", {
       title: "New test",
       okLabel: "Create",
-      defaultValue: "new-test.json"
+      defaultValue: freeTestName("new-test")
     });
     if (!raw) return;
     try {
@@ -2022,11 +2093,109 @@
     state.recording = null;
   }
 
+  // ---------------------------------------------------------
+  // Live screen: frames in, clicks and keystrokes back out
+  // ---------------------------------------------------------
+
+  function stopScreen() {
+    if (state.screenSource) {
+      state.screenSource.close();
+      state.screenSource = null;
+    }
+    const img = $("record-screen-img");
+    if (img) img.removeAttribute("src");
+  }
+
+  function startScreen(id) {
+    stopScreen();
+    const img = $("record-screen-img");
+    const hint = $("record-screen-hint");
+    const stateLabel = $("record-screen-state");
+    if (!img) return;
+
+    stateLabel.textContent = "connecting…";
+    const source = new EventSource(`/api/screen/${encodeURIComponent(id)}/events`);
+    state.screenSource = source;
+
+    source.addEventListener("frame", e => {
+      const frame = JSON.parse(e.data);
+      img.src = `data:image/jpeg;base64,${frame.data}`;
+      img.dataset.w = frame.width;
+      img.dataset.h = frame.height;
+      hint.hidden = true;
+      stateLabel.textContent = "live · click and type to drive it";
+    });
+    source.onerror = () => {
+      stateLabel.textContent = state.recording && state.recording.status === "recording"
+        ? "reconnecting…"
+        : "screen closed";
+    };
+  }
+
+  // Coordinates go out normalized so the panel can be any size and the page
+  // still receives the click where it was aimed.
+  function screenPoint(event) {
+    const img = $("record-screen-img");
+    const rect = img.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return {
+      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
+    };
+  }
+
+  async function sendInteraction(body) {
+    if (!state.recording || state.recording.status !== "recording") return;
+    try {
+      await api(`/api/screen/${encodeURIComponent(state.recording.id)}/interact`, {
+        method: "POST",
+        body: JSON.stringify(body)
+      });
+    } catch (e) {
+      // A dropped frame or a page mid-navigation is normal; only surface real problems.
+      if (!/no longer live|not live/i.test(e.message)) toast(e.message, "error");
+    }
+  }
+
+  function wireScreenInput() {
+    const screen = $("record-screen");
+    if (!screen) return;
+
+    screen.addEventListener("click", async e => {
+      const point = screenPoint(e);
+      if (!point) return;
+      screen.focus();
+      await sendInteraction({ kind: "click", ...point, clickCount: e.detail === 2 ? 2 : 1 });
+    });
+
+    screen.addEventListener("wheel", async e => {
+      const point = screenPoint(e);
+      if (!point) return;
+      e.preventDefault();
+      await sendInteraction({ kind: "scroll", ...point, deltaY: e.deltaY });
+    }, { passive: false });
+
+    screen.addEventListener("keydown", async e => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const named = ["Enter", "Tab", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
+      if (named.includes(e.key)) {
+        e.preventDefault();
+        await sendInteraction({ kind: "key", key: e.key });
+        return;
+      }
+      if (e.key.length === 1) {
+        e.preventDefault();
+        await sendInteraction({ kind: "type", text: e.key });
+      }
+    });
+  }
+
   function stopRecordStream() {
     if (state.recordSource) {
       state.recordSource.close();
       state.recordSource = null;
     }
+    stopScreen();
   }
 
   async function startRecording(url) {
@@ -2040,8 +2209,10 @@
       state.recording = session;
       $("record-setup").hidden = true;
       $("record-live").hidden = false;
+      $("record-screen-url").textContent = session.url;
       renderRecordedSteps();
       streamRecording(session.id);
+      startScreen(session.id);
     } catch (e) {
       err.textContent = e.message;
       err.hidden = false;
@@ -2166,6 +2337,7 @@
     });
     $("btn-record-stop").addEventListener("click", stopRecording);
     $("btn-record-apply").addEventListener("click", applyRecording);
+    wireScreenInput();
 
     $("btn-export").addEventListener("click", exportTest);
     $("btn-import").addEventListener("click", () => $("import-file").click());
@@ -2474,8 +2646,97 @@
     });
   }
 
+  // ---------------------------------------------------------
+  // Navigation drawer
+  // ---------------------------------------------------------
+
+  const NAV_KEY = "mmqa.navCollapsed";
+
+  function setNavCollapsed(collapsed) {
+    document.querySelector(".app").classList.toggle("nav-collapsed", collapsed);
+    const button = $("btn-toggle-nav");
+    if (button) {
+      button.setAttribute("aria-expanded", String(!collapsed));
+      button.setAttribute("aria-label", collapsed ? "Show navigation" : "Hide navigation");
+      button.title = collapsed ? "Show navigation (\\)" : "Hide navigation (\\)";
+    }
+    try { localStorage.setItem(NAV_KEY, collapsed ? "1" : "0"); } catch { /* private mode */ }
+  }
+
+  function wireNavDrawer() {
+    let collapsed = false;
+    try { collapsed = localStorage.getItem(NAV_KEY) === "1"; } catch { /* private mode */ }
+    setNavCollapsed(collapsed);
+
+    const toggle = $("btn-toggle-nav");
+    if (toggle) {
+      toggle.addEventListener("click", () => {
+        setNavCollapsed(!document.querySelector(".app").classList.contains("nav-collapsed"));
+      });
+    }
+
+    document.addEventListener("keydown", e => {
+      if (e.key !== "\\" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
+      e.preventDefault();
+      setNavCollapsed(!document.querySelector(".app").classList.contains("nav-collapsed"));
+    });
+  }
+
+  // ---------------------------------------------------------
+  // Projects and environments
+  //
+  // A project is a top-level folder. Its subfolders are environments -
+  // the same tests run against sandbox, staging or production - so the
+  // tree is two levels by design rather than arbitrarily deep.
+  // ---------------------------------------------------------
+
+  const DEFAULT_ENVIRONMENTS = ["Sandbox", "Production"];
+
+  function projectNames() {
+    return [...new Set(state.folders.map(f => f.split("/")[0]))].sort();
+  }
+
+  async function createProject() {
+    const name = await promptDialog(
+      "Project name, e.g. Coro or Anomali. Environments are added inside it.",
+      { title: "New project", okLabel: "Create" }
+    );
+    if (!name || !name.trim()) return;
+    const project = name.trim();
+    try {
+      await api("/api/folders", { method: "POST", body: JSON.stringify({ path: project }) });
+      // A project without an environment has nowhere to put a test, so give
+      // it the usual two up front; either can be removed.
+      for (const environment of DEFAULT_ENVIRONMENTS) {
+        await api("/api/folders", { method: "POST", body: JSON.stringify({ path: `${project}/${environment}` }) })
+          .catch(() => {});
+      }
+      await loadFolders();
+      toast(`Created project ${project} with ${DEFAULT_ENVIRONMENTS.join(" and ")}`, "ok");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  }
+
+  async function createEnvironment(project) {
+    const name = await promptDialog(
+      `Environment name inside ${project}, e.g. Sandbox, Staging or Production.`,
+      { title: "New environment", okLabel: "Create" }
+    );
+    if (!name || !name.trim()) return;
+    try {
+      await api("/api/folders", { method: "POST", body: JSON.stringify({ path: `${project}/${name.trim()}` }) });
+      await loadFolders();
+      toast(`Added ${name.trim()} to ${project}`, "ok");
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  }
+
   function wireFolderControls() {
-    $("btn-new-folder").addEventListener("click", () => createFolder(""));
+    $("btn-new-folder").addEventListener("click", createProject);
   }
 
   function wireSuiteControls() {
@@ -2696,6 +2957,7 @@
       renderTestList();
     });
 
+    wireNavDrawer();
     wireFolderControls();
     wireShareModal();
     wireRecorder();
