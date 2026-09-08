@@ -2157,7 +2157,7 @@ for (const record of listRuns()) {
 
 const server = app.listen(PORT, HOST, () => {
   const address = server.address();
-  console.log(`MMQA Studio running at http://${HOST}:${typeof address === "object" && address ? address.port : PORT}`);
+  console.log(`Maya Studio running at http://${HOST}:${typeof address === "object" && address ? address.port : PORT}`);
   // Optional: the app runs fine on file storage if this never connects.
   void db.init();
 });

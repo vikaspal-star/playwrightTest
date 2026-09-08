@@ -1,4 +1,4 @@
-# MMQA Studio upgrade review
+# Maya Studio upgrade review
 
 The subsequent Projects, environments and embedded browser upgrade is documented in [PROJECTS_UPGRADE.md](PROJECTS_UPGRADE.md), including additive migration and recovery details.
 
@@ -6,7 +6,7 @@ Reviewed against the README, action catalog, executor, API routes, browser UI, p
 
 ## Product requirement reconstructed from the application
 
-MMQA is a local/team QA automation studio. Its core workflow is to create or import JSON tests, record browser interactions, edit ordered steps, run a test or a suite sharing one browser session, inspect live screenshots and errors, and use history to assess outcomes. A site admin manages team accounts and feature access. Test owners can restrict sharing. Postgres mirrors finished runs, while AI analysis is optional.
+Maya is a local/team QA automation studio. Its core workflow is to create or import JSON tests, record browser interactions, edit ordered steps, run a test or a suite sharing one browser session, inspect live screenshots and errors, and use history to assess outcomes. A site admin manages team accounts and feature access. Test owners can restrict sharing. Postgres mirrors finished runs, while AI analysis is optional.
 
 Existing branding, plain JavaScript UI, TypeScript backend, JSON format, and Playwright runner are retained. No framework migration or speculative dependency upgrade is necessary to fix the observed defects. A full dependency audit found no known advisories for the installed dependency graph at review time.
 

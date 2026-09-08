@@ -58,7 +58,7 @@ export function validatePlan(raw: unknown): AgentPlan {
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
   if ((url.protocol !== "https:" && !(local && url.protocol === "http:")) || url.username || url.password || url.hash || url.search) throw new AgentInputError("Use HTTPS (or HTTP on localhost), without credentials, query parameters or fragments. Put API keys in server headers.");
   const headersEnv = string(p.headersEnv, "Headers variable", 100, true);
-  if (headersEnv && !/^MMQA_AGENT_[A-Z0-9_]+$/.test(headersEnv)) throw new AgentInputError("Use a server variable named MMQA_AGENT_… for headers.");
+  if (headersEnv && !/^(?:MAYA|MMQA)_AGENT_[A-Z0-9_]+$/.test(headersEnv)) throw new AgentInputError("Use a server variable named MAYA_AGENT_… for headers.");
   const body = object(p.body, "Request body");
   const profile = object(p.profile, "Test data profile");
   if (JSON.stringify(body).length > 12000 || JSON.stringify(profile).length > 8000) throw new AgentInputError("Request body or test data profile is too large.");

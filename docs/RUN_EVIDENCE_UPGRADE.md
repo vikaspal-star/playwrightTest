@@ -4,11 +4,11 @@ Reviewed and implemented September 7, 2026. The signed-in LambdaTest Automation 
 
 The sample contained 44 commands and a video. Console/terminal logs were empty, Network and Accessibility were not enabled, Performance had no Lighthouse report, and Smart UI had no results for that test. These empty states are not evidence that the vendor lacks those capabilities. The current [Automation dashboard guide](https://www.testmuai.com/support/docs/inside-testmu-platform/) describes commands, logs, network evidence, configuration, history and video together.
 
-## What MMQA now includes
+## What Maya now includes
 
 Open **Inspect run** in a test or suite, or **Reports → Run history & evidence**. The inspector has a fixed header, keyboard-accessible tabs and one content scroller. The project tabs remain Test cases, Requirements and Suites.
 
-| Reviewed area | MMQA behavior |
+| Reviewed area | Maya behavior |
 | --- | --- |
 | Commands | Search/filter saved step results, jump to the first failure, view per-step duration, screenshot and error. Historical results do not use the current editor's step definitions. |
 | Logs | Separate browser console/page errors and runner output, with search and browser severity filters. |

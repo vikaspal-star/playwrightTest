@@ -41,9 +41,9 @@ export function acquireWorkspaceLock(directory: string): () => void {
       if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("Invalid workspace lock. Check for an existing server before removing server.lock.");
       let alive = true;
       try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false; }
-      if (alive) throw new Error("Another MMQA server is already using this workspace.");
+      if (alive) throw new Error("Another Maya server is already using this workspace.");
       fs.unlinkSync(file);
     }
   }
-  throw new Error("Could not lock the MMQA workspace.");
+  throw new Error("Could not lock the Maya workspace.");
 }

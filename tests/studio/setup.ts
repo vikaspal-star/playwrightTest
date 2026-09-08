@@ -24,7 +24,7 @@ export default async function setup() {
       const timer = setTimeout(() => reject(new Error("Studio startup timed out.")), 20000);
       server.stdout.on("data", chunk => {
         output += chunk;
-        if (output.includes("MMQA Studio running at http://127.0.0.1:4187")) { clearTimeout(timer); resolve(); }
+        if (output.includes("Maya Studio running at http://127.0.0.1:4187")) { clearTimeout(timer); resolve(); }
       });
       server.stderr.on("data", chunk => { output += chunk; });
       server.once("error", error => { clearTimeout(timer); reject(error); });

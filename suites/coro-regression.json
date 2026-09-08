@@ -2,7 +2,8 @@
   "name": "coro-regression",
   "continueOnFailure": false,
   "tests": [
-    "corosbchannelpartneroption_n.json",
-    "main.json"
+    "anomali-prm-admin.json",
+    "main.json",
+    "corosbchannelpartneroption_n.json"
   ]
 }

@@ -1,6 +1,6 @@
-# MMQA — QA Automation Studio
+# Maya — QA Automation Studio
 
-<img src="ui/public/brand/logo.svg" alt="MMQA" width="240">
+<img src="ui/public/brand/logo.svg" alt="Maya" width="240">
 
 JSON-driven UI automation on Playwright. Each file in `json/` is one test case:
 
@@ -36,7 +36,7 @@ npm run report           # open the Playwright HTML report
 npm run allure:generate  # build the Allure report from allure-results/
 ```
 
-## MMQA Studio (web UI)
+## Maya Studio (web UI)
 
 A local UI for building and running the JSON tests:
 
@@ -148,7 +148,7 @@ Starts Postgres (host port **5433**) plus Adminer on http://localhost:8081. Fini
 
 ### Branding
 
-The UI carries Mindmatrix branding: navy `#081120`, the arc gradient running blue `#0F8EFB` through violet `#7A4FC8` into orange `#EF6B2A`, and Poppins type. The MMQA mark pairs that arc with a check for the QA half of the story; it lives in `ui/public/brand/` as `mark.svg` (square, also the favicon) and `logo.svg` (horizontal lockup). Poppins loads from Google Fonts with a system fallback, so the UI still looks right offline.
+The UI carries Mindmatrix branding: navy `#081120`, the arc gradient running blue `#0F8EFB` through violet `#7A4FC8` into orange `#EF6B2A`, and Poppins type. The Maya mark pairs that arc with a check for the QA half of the story; it lives in `ui/public/brand/` as `mark.svg` (square, also the favicon) and `logo.svg` (horizontal lockup). Poppins loads from Google Fonts with a system fallback, so the UI still looks right offline.
 
 ## AI usage and spend
 
@@ -177,7 +177,7 @@ Projects now open in three tabs: **Test cases**, **Requirements**, and **Suites*
 Open **Agent Testing → New agent test** and choose a project, environment and testing method:
 
 - **Manual:** describe expected behavior and scenario messages. Start a manual test, follow those messages in your agent's interface, paste the actual replies, then save the evidence and evaluate. No chat API is required. Reports identify these replies as manually entered; timing is not measured.
-- **API:** supply the chat endpoint, JSON request template and dot-separated response path. Configure credentials as a server environment variable beginning `MMQA_AGENT_`, containing JSON headers, and reference its name in the form. Each scenario gets a fresh session ID and subsequent messages include the conversation history when configured in the template.
+- **API:** supply the chat endpoint, JSON request template and dot-separated response path. Configure credentials as a server environment variable beginning `Maya_AGENT_`, containing JSON headers, and reference its name in the form. Each scenario gets a fresh session ID and subsequent messages include the conversation history when configured in the template.
 - **Optional AI:** generate draft scenarios from requirements, enable adaptive personas for API tests, or choose AI rubric checks for either testing method. These need `ANTHROPIC_API_KEY` and the `ai.analyze` feature. All evaluator calls use existing token telemetry. Scripted messages and text checks work without the evaluator key; the target API may have its own charges.
 
 Runs retain the plan snapshot, transcript, checks, thresholds, evidence and outcome. Critical failures fail the run; advisory failures, uncertain AI judgments or unverifiable quotes need review. Run a single scenario or the complete saved group, stop an API run, inspect previous runs, and export JSON or JUnit. JUnit treats every non-pass as a failure so incomplete checks do not silently pass CI.

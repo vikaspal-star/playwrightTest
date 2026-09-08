@@ -34,4 +34,4 @@ The Studio fixture launches a direct server child so teardown does not depend on
 
 The embedded browser supports the recorder's interaction actions. Complex iframe and popup journeys currently display a review warning and need explicit frame/tab actions from the manual action catalog. It is a Chromium screen with event recording, not a video editor or visual-baseline assertion system. Frame updates are transient; per-step run screenshots continue to persist as before. Screen/input APIs require the recording owner and same-origin authenticated requests. Two active recording sessions are allowed, including sessions still launching.
 
-MMQA remains a trusted-team local browser automation tool. This upgrade does not turn existing browser/file access into public multi-tenant isolation. Optional PostgreSQL mirroring and the existing provider configuration remain unchanged.
+Maya remains a trusted-team local browser automation tool. This upgrade does not turn existing browser/file access into public multi-tenant isolation. Optional PostgreSQL mirroring and the existing provider configuration remain unchanged.

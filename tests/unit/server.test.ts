@@ -19,7 +19,7 @@ function launch(workspace: string, env: NodeJS.ProcessEnv = {}): { process: Chil
     const timeout = setTimeout(() => { child.kill(); reject(new Error("Server startup timed out")); }, 10000);
     child.stdout!.on("data", chunk => {
       output += chunk;
-      const match = /MMQA Studio running at (http:\/\/[^\s]+)/.exec(output);
+      const match = /Maya Studio running at (http:\/\/[^\s]+)/.exec(output);
       if (match) { clearTimeout(timeout); resolve(match[1]); }
     });
     child.stderr!.on("data", chunk => { output += chunk; });

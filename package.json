@@ -1,5 +1,5 @@
 {
-  "name": "playwright-json-framework",
+  "name": "maya-studio",
   "version": "1.0.0",
   "scripts": {
     "test": "playwright test",

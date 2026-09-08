@@ -1,4 +1,4 @@
-# LambdaTest Agent Testing review and MMQA upgrade
+# LambdaTest Agent Testing review and Maya upgrade
 
 The later Automation dashboard review and run-detail upgrade are documented in [Run evidence upgrade](RUN_EVIDENCE_UPGRADE.md), covering every tab in the user's shared Automation run.
 
@@ -14,13 +14,13 @@ The [chat testing guide, updated August 25](https://www.testmuai.com/support/doc
 
 ## Delivered behavior
 
-| Requirement | MMQA implementation |
+| Requirement | Maya implementation |
 | --- | --- |
 | Dedicated workflow | Agent Testing navigation, saved agent library, Connection / Scenarios / Results sections |
 | Project context | Existing project and environment IDs validated on save and execution |
 | Manual testing | Tester follows saved messages and enters observed replies; no endpoint needed; evidence explicitly marked manual |
 | API testing | Exact HTTPS endpoint (HTTP allowed for localhost), POST JSON templates, nested response extraction |
-| Authentication | Server-side JSON header variables named `MMQA_AGENT_…`; credentials are not returned by the configuration API |
+| Authentication | Server-side JSON header variables named `Maya_AGENT_…`; credentials are not returned by the configuration API |
 | Data and session continuity | Typed `{{message}}`, `{{messages}}`, `{{sessionId}}`, `{{profile.key}}` values; separate session per scenario/iteration |
 | Reusable scenarios | Name, persona, goal, scripted messages and expected behavior; save/edit with revision conflicts |
 | Optional AI generation | Requirements produce draft scenarios for human review; user explicitly starts generation |
@@ -35,7 +35,7 @@ The [chat testing guide, updated August 25](https://www.testmuai.com/support/doc
 | Telemetry | Settings menu and account-menu shortcut; token/spend cards including zero state, period/refresh, feature/user/day breakdowns |
 | Overview | Live project and account totals alongside the existing test health metrics |
 
-AI generation and evaluation send the entered requirements and relevant conversation to the configured model provider. Target authentication headers are only used to call the configured agent. API tests can reach the host's network within MMQA's existing trusted-team boundary. Redirects are rejected; the server does not forward authentication through a redirected URL. No customer endpoint was supplied for live acceptance, so automated verification uses an isolated local fixture and mocked evaluator responses.
+AI generation and evaluation send the entered requirements and relevant conversation to the configured model provider. Target authentication headers are only used to call the configured agent. API tests can reach the host's network within Maya's existing trusted-team boundary. Redirects are rejected; the server does not forward authentication through a redirected URL. No customer endpoint was supplied for live acceptance, so automated verification uses an isolated local fixture and mocked evaluator responses.
 
 ## Verdict semantics
 

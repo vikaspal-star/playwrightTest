@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="MMQA">
-  <title>MMQA</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Maya">
+  <title>Maya</title>
   <defs>
-    <!-- The Mindmatrix arc gradient: blue through violet into orange. -->
-    <linearGradient id="mmqaArc" x1="10" y1="20" x2="54" y2="20" gradientUnits="userSpaceOnUse">
+    <!-- The Mindmatrix arc: blue through violet into orange. -->
+    <linearGradient id="mayaArc" x1="10" y1="20" x2="54" y2="20" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#0F8EFB"/>
       <stop offset="0.52" stop-color="#7A4FC8"/>
       <stop offset="1" stop-color="#EF6B2A"/>
@@ -12,14 +12,15 @@
   <rect width="64" height="64" rx="15" fill="#081120"/>
 
   <!-- Brand arc, echoing the sweep above the Mindmatrix wordmark. -->
-  <path d="M10.5 26.5 C 19 12.5, 45 12.5, 53.5 26.5"
-        fill="none" stroke="url(#mmqaArc)" stroke-width="5" stroke-linecap="round"/>
+  <path d="M10.5 25 C 19 11, 45 11, 53.5 25"
+        fill="none" stroke="url(#mayaArc)" stroke-width="5" stroke-linecap="round"/>
 
-  <!-- Sparkle accents at each end of the arc. -->
-  <path d="M10.5 20.6 l1.15 2.35 2.35 1.15 -2.35 1.15 -1.15 2.35 -1.15 -2.35 -2.35 -1.15 2.35 -1.15 z" fill="#0F8EFB"/>
-  <path d="M53.5 20.6 l1.15 2.35 2.35 1.15 -2.35 1.15 -1.15 2.35 -1.15 -2.35 -2.35 -1.15 2.35 -1.15 z" fill="#EF6B2A"/>
+  <!-- Sparkle terminals at each end of the arc. -->
+  <path d="M10.5 19.1 l1.15 2.35 2.35 1.15 -2.35 1.15 -1.15 2.35 -1.15 -2.35 -2.35 -1.15 2.35 -1.15 z" fill="#0F8EFB"/>
+  <path d="M53.5 19.1 l1.15 2.35 2.35 1.15 -2.35 1.15 -1.15 2.35 -1.15 -2.35 -2.35 -1.15 2.35 -1.15 z" fill="#EF6B2A"/>
 
-  <!-- Quality check: the QA half of the story. -->
-  <path d="M19.5 39 L28 47.5 L45.5 29.5"
-        fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- M for Maya. Its right stroke lifts clear of the baseline so the letter
+       also reads as a tick: the mark says both the name and the job. -->
+  <path d="M16.5 47.5 L16.5 31 L31.5 44 L44 31.5 L48.5 26"
+        fill="none" stroke="#FFFFFF" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

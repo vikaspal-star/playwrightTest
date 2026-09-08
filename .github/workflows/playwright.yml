@@ -1,4 +1,4 @@
-name: MMQA checks
+name: Maya checks
 
 on:
   push:

@@ -58,13 +58,20 @@ test("chat transport sends typed templates and server headers, rejects redirects
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as import("node:net").AddressInfo).port;
+  // The product is Maya now, but a workspace that already set MMQA_AGENT_* must
+  // keep working, so both prefixes are accepted and both are covered here.
+  process.env.MAYA_AGENT_UNIT_HEADERS = '{"x-test-key":"fixture-only"}';
   process.env.MMQA_AGENT_UNIT_HEADERS = '{"x-test-key":"fixture-only"}';
   try {
-    const p = plan(); p.endpoint = `http://127.0.0.1:${port}/chat`; p.headersEnv = "MMQA_AGENT_UNIT_HEADERS"; p.responsePath = "output.0.content";
+    const p = plan(); p.endpoint = `http://127.0.0.1:${port}/chat`; p.headersEnv = "MAYA_AGENT_UNIT_HEADERS"; p.responsePath = "output.0.content";
     const messages = [{ role: "user" as const, content: "Hello", at: "now" }], signal = new AbortController().signal;
     assert.equal(await sendAgentMessage(p, messages, "session", signal), "Hello Ana");
     assert.equal(requests[0].enabled, true); assert.equal(requests[0].sessionId, "session"); assert.deepEqual(requests[0].messages, [{ role: "user", content: "Hello" }]);
     p.endpoint = `http://127.0.0.1:${port}/redirect`; await assert.rejects(sendAgentMessage(p, messages, "session", signal), /redirected/);
     p.endpoint = `http://127.0.0.1:${port}/large`; await assert.rejects(sendAgentMessage(p, messages, "session", signal), /256 KB/);
-  } finally { delete process.env.MMQA_AGENT_UNIT_HEADERS; server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+
+    // The previous prefix still resolves, so an existing configuration is not broken by the rename.
+    const legacy = plan(); legacy.endpoint = `http://127.0.0.1:${port}/chat`; legacy.headersEnv = "MMQA_AGENT_UNIT_HEADERS"; legacy.responsePath = "output.0.content";
+    assert.equal(await sendAgentMessage(legacy, messages, "session", signal), "Hello Ana");
+  } finally { delete process.env.MAYA_AGENT_UNIT_HEADERS; delete process.env.MMQA_AGENT_UNIT_HEADERS; server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
